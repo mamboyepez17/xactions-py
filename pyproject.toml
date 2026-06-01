@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "xactions-py"
+version = "1.0.0"
+description = "X/Twitter automation toolkit en Python puro. Sin npm."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "httpx>=0.27",        # Cliente HTTP async (reemplaza node-fetch)
+    "mcp[cli]>=1.0",      # FastMCP para el servidor MCP
+    "click>=8.1",         # CLI framework
+]
+
+[project.scripts]
+xactions = "cli.xactions:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "cli*"]

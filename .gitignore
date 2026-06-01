@@ -1,0 +1,31 @@
+# Credenciales — NUNCA subir
+.env
+*.env
+cookies.txt
+auth_token.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Datos de salida
+*.json
+*.csv
+data/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
