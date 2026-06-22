@@ -3,9 +3,9 @@
 **X/Twitter automation toolkit — Python port of [XActions](https://github.com/nirholas/XActions).**  
 No npm. No Puppeteer. Just `httpx` + Twitter/X internal GraphQL API.
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python)
+![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
-![Dependencies](https://img.shields.io/badge/deps-3-brightgreen?style=flat-square)
+![Dependencies](https://img.shields.io/badge/deps-2-brightgreen?style=flat-square)
 ![npm free](https://img.shields.io/badge/npm-free-red?style=flat-square)
 
 ---
@@ -16,8 +16,8 @@ The original XActions is great but depends on npm, which has been the target of 
 
 | | XActions (original) | xactions-py |
 |---|---|---|
-| Runtime | Node.js + npm | Python 3.11+ |
-| Direct dependencies | ~100+ (npm) | **3** (httpx, mcp, click) |
+| Runtime | Node.js + npm | Python 3.10+ |
+| Direct dependencies | ~100+ (npm) | **2** (httpx, click) |
 | Supply chain risk | ⚠️ High | ✅ Minimal |
 | Headless browser | Puppeteer required | ❌ Not needed |
 | MCP server | ✅ | ✅ |
@@ -25,12 +25,25 @@ The original XActions is great but depends on npm, which has been the target of 
 
 ---
 
+## What's new in v1.1.0
+
+- **Full metrics extraction**: `parse_tweet` now handles `TweetWithVisibilityResults` and extracts likes, retweets, replies, quotes, views, bookmarks from both `legacy` and `public_metrics` (API v2)
+- **`_safe_int()`**: robust metric parsing that handles None, strings, and edge cases without crashing
+- **Mode "Top" by default**: `search_tweets` now returns tweets with the most engagement (likes, RTs) instead of just the most recent ones
+- **Sync wrappers**: `search_tweets_sync()`, `scrape_profile_sync()`, `scrape_tweets_sync()` — no asyncio needed from the caller
+- **Better error handling**: HTTP 403 during search returns collected results instead of crashing
+- **Fixed `pyproject.toml`**: build-backend changed to `setuptools.build_meta` (the previous `setuptools.backends.legacy:build` didn't exist)
+
+---
+
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/xactions-py
+git clone https://github.com/mamboyepez17/xactions-py
 cd xactions-py
-pip install httpx "mcp[cli]" click
+pip install httpx click
+# Optional: for MCP server
+pip install "mcp[cli]"
 ```
 
 With virtualenv (recommended on servers):
@@ -38,11 +51,11 @@ With virtualenv (recommended on servers):
 ```bash
 # Linux / macOS
 python3 -m venv .venv && source .venv/bin/activate
-pip install httpx "mcp[cli]" click
+pip install httpx click
 
 # Windows (PowerShell)
 python -m venv .venv; .venv\Scripts\Activate.ps1
-pip install httpx "mcp[cli]" click
+pip install httpx click
 ```
 
 ---
@@ -65,7 +78,46 @@ export TWITTER_COOKIES="auth_token=YOUR_TOKEN; ct0=YOUR_CT0"
 
 ---
 
-## CLI Usage
+## Usage
+
+### Sync wrappers (v1.1.0 — easiest way)
+
+```python
+from src.scraper.scrapers import search_tweets_sync, scrape_profile_sync
+
+cookies = "auth_token=xxx; ct0=yyy"
+
+# Search tweets with engagement (mode="Top")
+tweets = search_tweets_sync(cookies, "crypto Colombia", limit=20, mode="Top")
+for t in tweets:
+    print(f"[{t['likes']} likes, {t['retweets']} RTs] {t['text'][:60]}")
+    print(f"  Author: @{t['author']['username']} ({t['author']['followers']} followers)")
+
+# Get user profile
+profile = scrape_profile_sync(cookies, "elonmusk")
+print(f"@{profile['username']} — {profile['followers']} followers")
+```
+
+### Async API (original)
+
+```python
+import asyncio
+from src.scraper.client import TwitterClient
+from src.scraper.scrapers import search_tweets, scrape_profile
+
+async def main():
+    client = TwitterClient(cookies="auth_token=xxx; ct0=yyy")
+    
+    # Search tweets
+    tweets = await search_tweets(client, "AI", limit=50, mode="Top")
+    
+    # Get profile
+    profile = await scrape_profile(client, "elonmusk")
+
+asyncio.run(main())
+```
+
+### CLI
 
 ```bash
 # Profile
@@ -80,9 +132,9 @@ python cli/xactions.py non-followers YOUR_USERNAME --table
 
 # Tweets and search
 python cli/xactions.py tweets elonmusk --limit 50 --table
-python cli/xactions.py search "artificial intelligence" --mode Latest
+python cli/xactions.py search "artificial intelligence" --mode Top
 
-# Write actions (require auth_token in TWITTER_COOKIES)
+# Write actions (require auth_token)
 python cli/xactions.py post "Hello from xactions-py 🐍"
 python cli/xactions.py like 1234567890
 python cli/xactions.py follow jack
@@ -91,6 +143,37 @@ python cli/xactions.py unfollow jack
 # Bulk unfollow non-followers
 python cli/xactions.py bulk-unfollow YOUR_USERNAME --dry-run   # preview first!
 python cli/xactions.py bulk-unfollow YOUR_USERNAME --limit 200 --delay 2.5
+```
+
+---
+
+## Tweet data format
+
+Each tweet returned by `search_tweets` / `search_tweets_sync` contains:
+
+```python
+{
+    "id": "1234567890",
+    "text": "Full tweet text here...",
+    "author": {
+        "id": "123", "username": "user", "name": "Name",
+        "followers": 50000, "following": 200, "tweets_count": 5000,
+        "verified": True, "avatar": "https://...",
+    },
+    "created_at": "Mon Jun 21 12:00:00 +0000 2026",
+    "likes": 77815,
+    "retweets": 17709,
+    "replies": 2940,
+    "quotes": 150,
+    "views": 500000,
+    "bookmarks": 42,
+    "lang": "es",
+    "is_reply": False,
+    "is_retweet": False,
+    "is_quote": False,
+    "media": [{"type": "photo", "url": "https://..."}],
+    "url": "https://x.com/i/web/status/1234567890",
+}
 ```
 
 ---
@@ -150,7 +233,7 @@ xactions-py/
 ├── src/
 │   ├── scraper/
 │   │   ├── client.py       # TwitterClient — async HTTP with httpx
-│   │   └── scrapers.py     # profile, followers, tweets, search
+│   │   └── scrapers.py     # profile, followers, tweets, search + sync wrappers
 │   ├── actions/
 │   │   └── actions.py      # like, follow, tweet, bulk_unfollow
 │   └── mcp_tools/
@@ -167,6 +250,13 @@ xactions-py/
 
 ## Technical Notes
 
+### Search modes
+
+| Mode | Description | Use case |
+|---|---|---|
+| `"Top"` (default) | Tweets with most engagement (likes, RTs) | Trend analysis, finding popular content |
+| `"Latest"` | Most recent tweets | Real-time monitoring, news |
+
 ### GraphQL POST vs GET
 
 Twitter's GraphQL API uses **GET** for most read queries but requires **POST** for some endpoints:
@@ -178,8 +268,6 @@ Twitter's GraphQL API uses **GET** for most read queries but requires **POST** f
 | `Followers` | POST | Follower list |
 | `SearchTimeline` | POST | Tweet search |
 | Mutations (like, tweet, etc.) | POST | All write operations |
-
-This is handled automatically by the `"method": "POST"` flag in the endpoint config.
 
 ### GraphQL Query IDs
 
@@ -201,13 +289,20 @@ All endpoints tested and working:
 |---|---|---|
 | `profile` | ✅ | Works with GET |
 | `tweets` | ✅ | Works with GET |
-| `search` | ✅ | Requires POST |
+| `search` (Top) | ✅ | Returns tweets with engagement metrics |
+| `search` (Latest) | ✅ | Returns most recent tweets |
 | `followers` | ✅ | Requires POST |
 | `following` | ✅ | Works with GET |
 | `non-followers` | ✅ | Combines followers + following |
 | `bulk-unfollow` | ✅ | Works with --dry-run |
 | `post` | ✅ | Subject to daily tweet limits |
 | `like` | ✅ | Requires valid tweet ID |
+
+---
+
+## Used by
+
+- [TrendScope](https://github.com/mamboyepez17/trendscope) — Universal trend intelligence infrastructure (includes xactions-py as local module)
 
 ---
 
