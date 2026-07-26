@@ -1,17 +1,26 @@
 """
 XActions-PY — Actions
-Like, unlike, follow, unfollow, tweet, retweet, delete.
-Todo vía GraphQL interna. Requiere auth_token + ct0 en cookies.
+Like, unlike, follow, unfollow, tweet, retweet, delete, bookmark.
+Todo vía GraphQL interna o REST legacy. Requiere auth_token + ct0 en cookies.
+
+v1.2.0:
+  - Agregados create_bookmark / delete_bookmark.
+  - Mejor manejo de errores y cierre de cliente.
 """
 
+from __future__ import annotations
+
 import asyncio
-from typing import Optional
-import sys, os
+import os
+import sys
+from typing import Any, Optional
+
+# Permitir importaciones absolutas desde src/ cuando se ejecuta el CLI/scripts.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from scraper.client import TwitterClient, AuthError, GRAPHQL_ENDPOINTS, REST_BASE
+from scraper.client import TwitterClient, AuthError
 
 
-def _require_auth(client: TwitterClient):
+def _require_auth(client: TwitterClient) -> None:
     if not client.is_authenticated():
         raise AuthError("Se requiere autenticación. Configura auth_token y ct0.")
 
@@ -22,7 +31,7 @@ async def post_tweet(
     client: TwitterClient,
     text: str,
     reply_to_id: Optional[str] = None,
-) -> dict:
+) -> Dict[str, Any]:
     """Publica un tweet. Requiere auth."""
     _require_auth(client)
 
@@ -48,7 +57,7 @@ async def post_tweet(
     return {"success": bool(result), "tweet_id": result.get("rest_id")}
 
 
-async def delete_tweet(client: TwitterClient, tweet_id: str) -> dict:
+async def delete_tweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "DeleteTweet",
@@ -58,9 +67,9 @@ async def delete_tweet(client: TwitterClient, tweet_id: str) -> dict:
     return {"success": "data" in data}
 
 
-# ─── Engagement ───────────────────────────────────────────────────────────────
+# ─── Engagement ─────────────────────────────────────────────────────────────
 
-async def like_tweet(client: TwitterClient, tweet_id: str) -> dict:
+async def like_tweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "FavoriteTweet",
@@ -70,7 +79,7 @@ async def like_tweet(client: TwitterClient, tweet_id: str) -> dict:
     return {"success": data.get("data", {}).get("favorite_tweet") == "Done"}
 
 
-async def unlike_tweet(client: TwitterClient, tweet_id: str) -> dict:
+async def unlike_tweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "UnfavoriteTweet",
@@ -80,7 +89,7 @@ async def unlike_tweet(client: TwitterClient, tweet_id: str) -> dict:
     return {"success": data.get("data", {}).get("unfavorite_tweet") == "Done"}
 
 
-async def retweet(client: TwitterClient, tweet_id: str) -> dict:
+async def retweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "CreateRetweet",
@@ -91,7 +100,7 @@ async def retweet(client: TwitterClient, tweet_id: str) -> dict:
     return {"success": bool(result)}
 
 
-async def unretweet(client: TwitterClient, tweet_id: str) -> dict:
+async def unretweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "DeleteRetweet",
@@ -101,9 +110,31 @@ async def unretweet(client: TwitterClient, tweet_id: str) -> dict:
     return {"success": bool(data.get("data"))}
 
 
-# ─── Follow / Unfollow ────────────────────────────────────────────────────────
+# ─── Bookmarks ───────────────────────────────────────────────────────────────
 
-async def follow_user(client: TwitterClient, user_id: str) -> dict:
+async def create_bookmark(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
+    _require_auth(client)
+    data = await client.graphql(
+        "CreateBookmark",
+        variables={"tweet_id": tweet_id},
+        mutation=True,
+    )
+    return {"success": "data" in data}
+
+
+async def delete_bookmark(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
+    _require_auth(client)
+    data = await client.graphql(
+        "DeleteBookmark",
+        variables={"tweet_id": tweet_id},
+        mutation=True,
+    )
+    return {"success": "data" in data}
+
+
+# ─── Follow / Unfollow ─────────────────────────────────────────────────────────
+
+async def follow_user(client: TwitterClient, user_id: str) -> Dict[str, Any]:
     """Follow por user_id. Usa REST endpoint (no GraphQL mutation disponible)."""
     _require_auth(client)
     data = await client.rest_post(
@@ -113,7 +144,7 @@ async def follow_user(client: TwitterClient, user_id: str) -> dict:
     return {"success": bool(data.get("id_str") or data.get("id"))}
 
 
-async def unfollow_user(client: TwitterClient, user_id: str) -> dict:
+async def unfollow_user(client: TwitterClient, user_id: str) -> Dict[str, Any]:
     """Unfollow por user_id."""
     _require_auth(client)
     data = await client.rest_post(
@@ -123,21 +154,21 @@ async def unfollow_user(client: TwitterClient, user_id: str) -> dict:
     return {"success": bool(data.get("id_str") or data.get("id"))}
 
 
-# ─── Bulk unfollow ────────────────────────────────────────────────────────────
+# ─── Bulk unfollow ─────────────────────────────────────────────────────────────
 
 async def bulk_unfollow(
     client: TwitterClient,
     user_ids: list,
     delay_seconds: float = 2.0,
-    on_progress=None,
-) -> dict:
+    on_progress: Optional[callable] = None,
+) -> Dict[str, Any]:
     """
     Hace unfollow masivo con delay entre cada acción para evitar rate limits.
     on_progress: callable(current, total, username) opcional.
     """
     _require_auth(client)
     success = 0
-    failed  = 0
+    failed = 0
 
     for i, uid in enumerate(user_ids):
         try:

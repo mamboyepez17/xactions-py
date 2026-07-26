@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xactions-py"
-version = "1.1.0"
+version = "1.2.0"
 description = "X/Twitter automation toolkit en Python puro. Sin npm. Sin Puppeteer."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,7 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp[cli]>=1.0"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "respx>=0.22", "pytest-asyncio>=0.23"]
 
 [project.scripts]
 xactions = "cli.xactions:cli"
@@ -25,3 +25,7 @@ xactions = "cli.xactions:cli"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*", "cli*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

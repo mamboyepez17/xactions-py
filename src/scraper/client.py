@@ -2,14 +2,26 @@
 XActions-PY — Twitter HTTP Client
 Replica del TwitterHttpClient de XActions pero en Python puro.
 Sin npm, sin Puppeteer. Solo httpx + las GraphQL internas de Twitter.
+
+v1.2.0:
+  - Cliente HTTP persistente (connection pooling / keep-alive).
+  - Reintentos con backoff exponencial para errores de red y rate limits.
+  - Logging estructurado.
+  - Context manager async para cerrar conexiones de forma segura.
+  - Helpers REST (GET/POST) para validación de sesión y endpoints legacy.
 """
 
-import httpx
-import random
+from __future__ import annotations
+
 import asyncio
 import json
-from typing import Optional, Dict, Any
+import logging
+import random
+import time
+from typing import Any, Dict, Optional
 from urllib.parse import unquote
+
+import httpx
 
 # ─── Bearer Token público (embebido en el JS bundle de Twitter) ───────────────
 BEARER_TOKEN = (
@@ -18,8 +30,8 @@ BEARER_TOKEN = (
 )
 
 GRAPHQL_BASE = "https://x.com/i/api/graphql"
-REST_BASE    = "https://x.com/i/api"
-API_BASE     = "https://api.x.com"
+REST_BASE = "https://x.com/i/api"
+API_BASE = "https://api.x.com"
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -28,26 +40,34 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
 ]
 
-# ─── GraphQL endpoints (reverse-engineered, mismos que XActions) ──────────────
-GRAPHQL_ENDPOINTS = {
-    "UserByScreenName":     {"queryId": "NimuplG1OB7Fd2btCLdBOw", "operationName": "UserByScreenName"},
-    "UserByRestId":         {"queryId": "tD8zKvQzwY3kdx5yz6YmOw", "operationName": "UserByRestId"},
-    "UserTweets":           {"queryId": "QWF3SzpHmykQHsQMixG0cg", "operationName": "UserTweets"},
+# ─── GraphQL endpoints (reverse-engineered, actualizados desde twikit) ─────────
+GRAPHQL_ENDPOINTS: Dict[str, Dict[str, Any]] = {
+    "UserByScreenName": {"queryId": "NimuplG1OB7Fd2btCLdBOw", "operationName": "UserByScreenName"},
+    "UserByRestId": {"queryId": "tD8zKvQzwY3kdx5yz6YmOw", "operationName": "UserByRestId"},
+    "UserTweets": {"queryId": "QWF3SzpHmykQHsQMixG0cg", "operationName": "UserTweets"},
     "UserTweetsAndReplies": {"queryId": "vMkJyzx1wdmvOeeNG0n6Wg", "operationName": "UserTweetsAndReplies"},
-    "UserMedia":            {"queryId": "2tLOJWwGuCTytDrGBg8VwQ", "operationName": "UserMedia"},
-    "TweetDetail":          {"queryId": "U0HTv-bAWTBYylwEMT7x5A", "operationName": "TweetDetail"},
-    "SearchTimeline":       {"queryId": "-TFXKoMnMTKdEXcCn-eahw", "operationName": "SearchTimeline", "method": "POST"},
-    "Followers":            {"queryId": "gC_lyAxZOptAMLCJX5UhWw", "operationName": "Followers", "method": "POST"},
-    "Following":            {"queryId": "2vUj-_Ek-UmBVDNtd8OnQA", "operationName": "Following"},
+    "UserMedia": {"queryId": "2tLOJWwGuCTytDrGBg8VwQ", "operationName": "UserMedia"},
+    "UserLikes": {"queryId": "IohM3gxQHfvWePH5E3KuNA", "operationName": "Likes"},
+    "TweetDetail": {"queryId": "U0HTv-bAWTBYylwEMT7x5A", "operationName": "TweetDetail"},
+    "Favoriters": {"queryId": "LLkw5EcVutJL6y-2gkz22A", "operationName": "Favoriters"},
+    "Retweeters": {"queryId": "X-XEqG5qHQSAwmvy00xfyQ", "operationName": "Retweeters"},
+    "SearchTimeline": {"queryId": "flaR-PUMshxFWZWPNpq4zA", "operationName": "SearchTimeline", "method": "POST"},
+    "Followers": {"queryId": "gC_lyAxZOptAMLCJX5UhWw", "operationName": "Followers", "method": "POST"},
+    "Following": {"queryId": "2vUj-_Ek-UmBVDNtd8OnQA", "operationName": "Following"},
+    "Bookmarks": {"queryId": "qToeLeMs43Q8cr7tRYXmaQ", "operationName": "Bookmarks"},
+    "HomeTimeline": {"queryId": "-X_hcgQzmHGl29-UXxz4sw", "operationName": "HomeTimeline", "method": "POST"},
+    "HomeLatestTimeline": {"queryId": "U0cdisy7QFIoTfu3-Okw0A", "operationName": "HomeLatestTimeline", "method": "POST"},
     # Mutations
-    "CreateTweet":          {"queryId": "SiM_cAu83R0wnrpmKQQSEw", "operationName": "CreateTweet"},
-    "FavoriteTweet":        {"queryId": "lI07N6Otwv1PhnEgXILM7A", "operationName": "FavoriteTweet"},
-    "UnfavoriteTweet":      {"queryId": "ZYKSe-w7KEslx3JhSIk5LA", "operationName": "UnfavoriteTweet"},
-    "CreateRetweet":        {"queryId": "ojPdsZsimiJrUGLR1sjUtA", "operationName": "CreateRetweet"},
-    "DeleteRetweet":        {"queryId": "iQtK4dl5hBmXewYZuEOKVw", "operationName": "DeleteRetweet"},
-    "FollowUser":           {"queryId": None, "operationName": None},  # REST endpoint
-    "UnfollowUser":         {"queryId": None, "operationName": None},  # REST endpoint
-    "DeleteTweet":          {"queryId": "VaenaVgh5q5ih7kvyVjgtg", "operationName": "DeleteTweet"},
+    "CreateTweet": {"queryId": "SiM_cAu83R0wnrpmKQQSEw", "operationName": "CreateTweet"},
+    "FavoriteTweet": {"queryId": "lI07N6Otwv1PhnEgXILM7A", "operationName": "FavoriteTweet"},
+    "UnfavoriteTweet": {"queryId": "ZYKSe-w7KEslx3JhSIk5LA", "operationName": "UnfavoriteTweet"},
+    "CreateRetweet": {"queryId": "ojPdsZsimiJrUGLR1sjUtA", "operationName": "CreateRetweet"},
+    "DeleteRetweet": {"queryId": "iQtK4dl5hBmXewYZuEOKVw", "operationName": "DeleteRetweet"},
+    "DeleteTweet": {"queryId": "VaenaVgh5q5ih7kvyVjgtg", "operationName": "DeleteTweet"},
+    "CreateBookmark": {"queryId": "aoDbu3RHznuiSkQ9aNM67Q", "operationName": "CreateBookmark"},
+    "DeleteBookmark": {"queryId": "Wlmlj2-xzyS1GN3a6cj-mQ", "operationName": "DeleteBookmark"},
+    "FollowUser": {"queryId": None, "operationName": None},  # REST endpoint
+    "UnfollowUser": {"queryId": None, "operationName": None},  # REST endpoint
 }
 
 DEFAULT_FEATURES = {
@@ -75,24 +95,46 @@ DEFAULT_FEATURES = {
     "responsive_web_enhance_cards_enabled": False,
 }
 
+_log = logging.getLogger(__name__)
+
+
+# ─── Excepciones ───────────────────────────────────────────────────────────────
 
 class TwitterError(Exception):
+    """Base de errores del cliente."""
     pass
+
 
 class RateLimitError(TwitterError):
+    """HTTP 429 o código 88 de la API."""
     pass
+
 
 class AuthError(TwitterError):
+    """HTTP 401/403 o código 32 de la API."""
     pass
+
 
 class NotFoundError(TwitterError):
+    """HTTP 404 o código 34 de la API."""
     pass
 
+
+class ForbiddenError(TwitterError):
+    """HTTP 403 — acceso denegado a un recurso."""
+    pass
+
+
+# ─── Cliente ────────────────────────────────────────────────────────────────────
 
 class TwitterClient:
     """
     Cliente HTTP asíncrono para la GraphQL interna de Twitter/X.
     Equivalente directo del TwitterHttpClient de XActions en Python.
+
+    Uso:
+        async with TwitterClient(cookies=...) as client:
+            profile = await scrape_profile(client, "elonmusk")
     """
 
     def __init__(
@@ -100,37 +142,90 @@ class TwitterClient:
         cookies: Optional[str] = None,
         proxy: Optional[str] = None,
         max_retries: int = 3,
+        timeout: float = 30.0,
+        user_agent: Optional[str] = None,
     ):
         self._cookie_str = cookies or ""
         self._cookies: Dict[str, str] = {}
         self._proxy = proxy
-        self._max_retries = max_retries
-        self._user_agent = random.choice(USER_AGENTS)
+        self._max_retries = max(0, max_retries)
+        self._timeout = timeout
+        self._user_agent = user_agent or random.choice(USER_AGENTS)
         self._csrf_token: Optional[str] = None
+        self._client: Optional[httpx.AsyncClient] = None
+        self._closed = False
+        self._last_rate_limit_reset: Optional[int] = None
 
         if cookies:
             self._parse_cookies(cookies)
 
-    def _parse_cookies(self, cookie_str: str):
+    # ─── Ciclo de vida ─────────────────────────────────────────────────────────
+
+    async def __aenter__(self) -> "TwitterClient":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.aclose()
+
+    def __del__(self):
+        # Limpieza best-effort si el usuario olvidó cerrar.
+        if self._client is not None and not self._closed:
+            try:
+                asyncio.get_running_loop().create_task(self.aclose())
+            except RuntimeError:
+                pass
+
+    async def aclose(self) -> None:
+        """Cierra el cliente HTTP y libera conexiones."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+        self._closed = True
+        _log.debug("TwitterClient cerrado")
+
+    def close(self) -> None:
+        """Cierre síncrono (útil para wrappers sync)."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.run_until_complete(self.aclose())
+        except RuntimeError:
+            # No hay loop corriendo; usamos un loop nuevo.
+            asyncio.run(self.aclose())
+
+    @property
+    def _http(self) -> httpx.AsyncClient:
+        """Devuelve el cliente HTTP persistente, creándolo si es necesario."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                proxy=self._proxy,
+                timeout=self._timeout,
+                follow_redirects=True,
+            )
+            _log.debug("TwitterClient: cliente HTTP creado")
+        return self._client
+
+    # ─── Cookies / auth ──────────────────────────────────────────────────────────
+
+    def _parse_cookies(self, cookie_str: str) -> None:
         """Parsea string de cookies 'name=val; name2=val2' a dict."""
+        self._cookies = {}
         for part in cookie_str.split(";"):
             part = part.strip()
             if "=" in part:
                 k, v = part.split("=", 1)
-                self._cookies[k.strip()] = v.strip()
-        # ct0 es el CSRF token de Twitter
-        # El x-csrf-token header debe coincidir EXACTAMENTE con el ct0 cookie
+                self._cookies[k.strip()] = unquote(v.strip())
         self._csrf_token = self._cookies.get("ct0", "")
+        self._cookie_str = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
 
-    def set_cookies(self, cookie_str: str):
+    def set_cookies(self, cookie_str: str) -> None:
         self._cookie_str = cookie_str
         self._parse_cookies(cookie_str)
 
     def is_authenticated(self) -> bool:
         return bool(self._cookies.get("auth_token"))
 
-    def _build_headers(self, extra: Optional[Dict] = None) -> Dict[str, str]:
-        headers = {
+    def _build_headers(self, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        headers: Dict[str, str] = {
             "Authorization": f"Bearer {BEARER_TOKEN}",
             "User-Agent": self._user_agent,
             "Accept": "*/*",
@@ -144,106 +239,186 @@ class TwitterClient:
         if self._csrf_token:
             headers["x-csrf-token"] = self._csrf_token
         if self._cookies:
-            headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
+            headers["Cookie"] = self._cookie_str
         if self.is_authenticated():
             headers["x-twitter-auth-type"] = "OAuth2Session"
         if extra:
             headers.update(extra)
         return headers
 
+    # ─── Requests ────────────────────────────────────────────────────────────────
+
+    def _retry_delay(self, attempt: int, response: Optional[httpx.Response] = None) -> float:
+        """Calcula segundos de espera antes de reintentar."""
+        if response is not None and response.status_code == 429:
+            # Twitter usa x-rate-limit-reset (timestamp unix) o retry-after.
+            reset_ts = response.headers.get("x-rate-limit-reset")
+            if reset_ts:
+                try:
+                    wait = max(0.0, float(reset_ts) - time.time())
+                    self._last_rate_limit_reset = int(reset_ts)
+                    # Cap a 30s para evitar esperas absurdas cuando el header
+                    # viene mal o muy lejano (también útil en tests).
+                    wait = min(wait, 30.0)
+                    _log.warning("Rate limit. Esperando %.1fs (reset=%s)", wait, reset_ts)
+                    return wait
+                except (ValueError, TypeError):
+                    pass
+            retry_after = response.headers.get("retry-after")
+            if retry_after:
+                try:
+                    return float(retry_after)
+                except (ValueError, TypeError):
+                    pass
+        return min(2.0 ** attempt, 30.0)
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        json_payload: Optional[Dict[str, Any]] = None,
+        data_payload: Optional[Dict[str, Any]] = None,
+        allow_replay: bool = True,
+    ) -> httpx.Response:
+        """Request base con reintentos, rate-limit handling y logging."""
+        request_headers = self._build_headers(headers)
+        last_exception: Optional[Exception] = None
+
+        for attempt in range(self._max_retries + 1):
+            try:
+                if method.upper() == "GET":
+                    resp = await self._http.get(url, headers=request_headers, params=params)
+                elif json_payload is not None:
+                    resp = await self._http.post(url, headers=request_headers, json=json_payload)
+                elif data_payload is not None:
+                    resp = await self._http.post(url, headers=request_headers, data=data_payload)
+                else:
+                    resp = await self._http.post(url, headers=request_headers)
+
+                if resp.status_code == 429:
+                    if attempt < self._max_retries:
+                        delay = self._retry_delay(attempt, resp)
+                        await asyncio.sleep(delay)
+                        continue
+                    raise RateLimitError(f"Rate limited. Reset: {self._last_rate_limit_reset}")
+
+                if resp.status_code == 401:
+                    raise AuthError(f"No autenticado o cookie expirada (HTTP {resp.status_code})")
+
+                if resp.status_code == 403:
+                    raise ForbiddenError(f"Acceso denegado (HTTP {resp.status_code}): {resp.text[:200]}")
+
+                if resp.status_code == 404:
+                    raise NotFoundError(f"Recurso no encontrado (HTTP {resp.status_code})")
+
+                if resp.status_code >= 400:
+                    raise TwitterError(f"HTTP {resp.status_code}: {resp.text[:500]}")
+
+                return resp
+
+            except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
+                last_exception = e
+                if attempt < self._max_retries:
+                    delay = 2.0 ** attempt
+                    _log.warning("Error de red en intento %d/%d: %s. Reintentando en %.1fs", attempt + 1, self._max_retries + 1, e, delay)
+                    await asyncio.sleep(delay)
+                    continue
+                raise TwitterError(f"Error de red tras {self._max_retries + 1} intentos: {e}")
+
+        raise TwitterError(f"Max reintentos alcanzados: {last_exception}")
+
+    # ─── GraphQL ─────────────────────────────────────────────────────────────────
+
     async def graphql(
         self,
         endpoint_name: str,
         variables: Dict[str, Any],
-        features: Optional[Dict] = None,
+        features: Optional[Dict[str, Any]] = None,
         mutation: bool = False,
-    ) -> Dict:
-        """
-        Ejecuta una query o mutation GraphQL contra la API interna de Twitter.
-        """
+    ) -> Dict[str, Any]:
+        """Ejecuta una query o mutation GraphQL contra la API interna de Twitter."""
         ep = GRAPHQL_ENDPOINTS[endpoint_name]
         query_id = ep["queryId"]
         operation = ep["operationName"]
+
+        if not query_id or not operation:
+            raise TwitterError(f"Endpoint {endpoint_name} no tiene queryId/operationName configurado")
+
         url = f"{GRAPHQL_BASE}/{query_id}/{operation}"
-
         features_payload = features if features is not None else DEFAULT_FEATURES
+        use_post = mutation or ep.get("method") == "POST"
 
-        for attempt in range(self._max_retries):
-            try:
-                async with httpx.AsyncClient(
-                    proxy=self._proxy,
-                    timeout=30,
-                    follow_redirects=True,
-                ) as client:
-                    use_post = mutation or ep.get("method") == "POST"
-                    if use_post:
-                        payload = {
-                            "variables": variables,
-                            "features": features_payload,
-                            "queryId": query_id,
-                        }
-                        resp = await client.post(
-                            url,
-                            json=payload,
-                            headers=self._build_headers({"Content-Type": "application/json"}),
-                        )
-                    else:
-                        params = {
-                            "variables": json.dumps(variables),
-                            "features": json.dumps(features_payload),
-                        }
-                        resp = await client.get(
-                            url,
-                            params=params,
-                            headers=self._build_headers(),
-                        )
+        if use_post:
+            payload = {
+                "variables": variables,
+                "features": features_payload,
+                "queryId": query_id,
+            }
+            resp = await self._request(
+                "POST",
+                url,
+                headers={"Content-Type": "application/json"},
+                json_payload=payload,
+            )
+        else:
+            params = {
+                "variables": json.dumps(variables),
+                "features": json.dumps(features_payload),
+            }
+            resp = await self._request("GET", url, params=params)
 
-                    if resp.status_code == 429:
-                        retry_after = int(resp.headers.get("x-rate-limit-reset", 0))
-                        raise RateLimitError(f"Rate limited. Reset: {retry_after}")
+        data = resp.json()
+        if "errors" in data and data["errors"]:
+            err = data["errors"][0]
+            code = err.get("code", 0)
+            message = err.get("message", "Unknown API error")
+            if code == 32:
+                raise AuthError(message)
+            if code == 88:
+                raise RateLimitError(message)
+            if code == 34:
+                raise NotFoundError(message)
+            raise TwitterError(f"API error {code}: {message}")
 
-                    if resp.status_code == 401:
-                        raise AuthError("No autenticado o cookie expirada")
+        return data
 
-                    if resp.status_code == 404:
-                        raise NotFoundError("Recurso no encontrado")
+    # ─── REST helpers ────────────────────────────────────────────────────────────
 
-                    if resp.status_code >= 400:
-                        raise TwitterError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+    async def rest_get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """GET a un endpoint REST (ej. verify_credentials)."""
+        url = f"{REST_BASE}{path}"
+        resp = await self._request("GET", url, params=params)
+        return resp.json()
 
-                    data = resp.json()
-                    if "errors" in data and data["errors"]:
-                        err = data["errors"][0]
-                        code = err.get("code", 0)
-                        if code == 32:
-                            raise AuthError(err.get("message", "Auth error"))
-                        if code == 88:
-                            raise RateLimitError(err.get("message", "Rate limit"))
-                        if code == 34:
-                            raise NotFoundError(err.get("message", "Not found"))
-                        raise TwitterError(f"API error {code}: {err.get('message')}")
-
-                    return data
-
-            except (httpx.ConnectError, httpx.TimeoutException) as e:
-                if attempt == self._max_retries - 1:
-                    raise TwitterError(f"Error de red: {e}")
-                await asyncio.sleep(2 ** attempt)
-
-        raise TwitterError("Max reintentos alcanzados")
-
-    async def rest_post(self, path: str, data: Dict) -> Dict:
+    async def rest_post(self, path: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """POST a un endpoint REST (usado para follow/unfollow)."""
         url = f"{REST_BASE}{path}"
-        async with httpx.AsyncClient(proxy=self._proxy, timeout=30) as client:
-            resp = await client.post(
-                url,
-                data=data,
-                headers=self._build_headers({"Content-Type": "application/x-www-form-urlencoded"}),
-            )
-            if resp.status_code == 429:
-                raise RateLimitError("Rate limited")
-            if resp.status_code == 401:
-                raise AuthError("No autenticado")
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._request(
+            "POST",
+            url,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data_payload=data,
+        )
+        return resp.json()
+
+    # ─── Validación de sesión ────────────────────────────────────────────────────
+
+    async def validate_cookies(self) -> Dict[str, Any]:
+        """
+        Verifica que las cookies sean válidas haciendo una petición autenticada.
+        Devuelve información básica de la cuenta o lanza AuthError/ForbiddenError.
+        """
+        if not self.is_authenticated():
+            raise AuthError("Falta auth_token en las cookies")
+        try:
+            data = await self.rest_get("/1.1/account/verify_credentials.json", params={"skip_status": "true"})
+            return {
+                "valid": True,
+                "user_id": data.get("id_str"),
+                "username": data.get("screen_name"),
+                "name": data.get("name"),
+            }
+        except (AuthError, ForbiddenError) as e:
+            return {"valid": False, "error": str(e)}

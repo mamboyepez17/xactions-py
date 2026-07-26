@@ -1,13 +1,28 @@
 """
 XActions-PY — Scrapers
 Replicas en Python de los scrapers HTTP de XActions.
-v1.1.0: Mejorado parse_tweet para manejar todas las variantes de GraphQL,
-        mejor extraccion de metricas, y wrapper sync para uso facil.
+
+v1.2.0:
+  - Nuevos scrapers: replies, favoriters, retweeters, bookmarks, likes de usuario,
+    home timeline y trending topics.
+  - Mejor manejo de errores (ForbiddenError, RateLimitError).
+  - Wrappers sincronos que cierran automáticamente el cliente HTTP.
+  - Cache interna de user_id para reducir lookups repetidos.
 """
 
+from __future__ import annotations
+
 import asyncio
-from typing import Optional, List, Dict, Any
-from .client import TwitterClient, DEFAULT_FEATURES, NotFoundError, TwitterError
+from typing import Any, Dict, List, Optional, Tuple
+
+from .client import (
+    TwitterClient,
+    DEFAULT_FEATURES,
+    ForbiddenError,
+    NotFoundError,
+    RateLimitError,
+    TwitterError,
+)
 
 
 # ─── Helpers de parseo ────────────────────────────────────────────────────────
@@ -26,33 +41,33 @@ def _safe_int(val: Any, default: int = 0) -> int:
         return default
 
 
-def parse_user(raw: Dict) -> Optional[Dict]:
+def parse_user(raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Convierte un resultado GraphQL de usuario al formato XActions."""
     if not raw or raw.get("__typename") == "UserUnavailable":
         return None
     legacy = raw.get("legacy", {})
     return {
-        "id":             raw.get("rest_id"),
-        "username":       legacy.get("screen_name"),
-        "name":           legacy.get("name"),
-        "bio":            legacy.get("description"),
-        "verified":       raw.get("is_blue_verified", legacy.get("verified", False)),
-        "avatar":         _upgrade_avatar(legacy.get("profile_image_url_https")),
-        "followers":      _safe_int(legacy.get("followers_count", 0)),
-        "following":      _safe_int(legacy.get("friends_count", 0)),
-        "tweets_count":   _safe_int(legacy.get("statuses_count", 0)),
-        "protected":      legacy.get("protected", False),
-        "created_at":     legacy.get("created_at"),
-        "location":       legacy.get("location"),
-        "website":        (legacy.get("entities", {})
-                               .get("url", {})
-                               .get("urls", [{}])[0]
-                               .get("expanded_url")),
-        "platform":       "twitter",
+        "id": raw.get("rest_id"),
+        "username": legacy.get("screen_name"),
+        "name": legacy.get("name"),
+        "bio": legacy.get("description"),
+        "verified": raw.get("is_blue_verified", legacy.get("verified", False)),
+        "avatar": _upgrade_avatar(legacy.get("profile_image_url_https")),
+        "followers": _safe_int(legacy.get("followers_count", 0)),
+        "following": _safe_int(legacy.get("friends_count", 0)),
+        "tweets_count": _safe_int(legacy.get("statuses_count", 0)),
+        "protected": legacy.get("protected", False),
+        "created_at": legacy.get("created_at"),
+        "location": legacy.get("location"),
+        "website": (legacy.get("entities", {})
+                        .get("url", {})
+                        .get("urls", [{}])[0]
+                        .get("expanded_url")),
+        "platform": "twitter",
     }
 
 
-def parse_tweet(raw: Dict, author: Optional[Dict] = None) -> Optional[Dict]:
+def parse_tweet(raw: Dict[str, Any], author: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
     Convierte un resultado GraphQL de tweet al formato XActions.
     Maneja multiples variantes de estructura que Twitter devuelve:
@@ -76,9 +91,8 @@ def parse_tweet(raw: Dict, author: Optional[Dict] = None) -> Optional[Dict]:
     if result.get("__typename") == "TweetWithVisibilityResults":
         result = result.get("tweet", result)
 
-    core    = result.get("core", {})
-    legacy  = result.get("legacy", {})
-    notes   = result.get("notes", {})
+    core = result.get("core", {})
+    legacy = result.get("legacy", {})
     metrics = result.get("public_metrics") or {}
 
     # El id puede estar en varios lugares
@@ -102,39 +116,37 @@ def parse_tweet(raw: Dict, author: Optional[Dict] = None) -> Optional[Dict]:
     replies = _safe_int(legacy.get("reply_count", 0)) or _safe_int(metrics.get("reply_count", 0))
     quotes = _safe_int(legacy.get("quote_count", 0)) or _safe_int(metrics.get("quote_count", 0))
     views = _safe_int(result.get("views", {}).get("count", 0))
-
-    # Bookmark count (si esta disponible)
     bookmarks = _safe_int(legacy.get("bookmark_count", 0))
 
     return {
-        "id":           tweet_id,
-        "text":         text,
-        "author":       tweet_author or {},
-        "created_at":   legacy.get("created_at"),
-        "likes":        likes,
-        "retweets":     retweets,
-        "replies":      replies,
-        "quotes":       quotes,
-        "views":        views,
-        "bookmarks":    bookmarks,
-        "lang":         legacy.get("lang"),
-        "is_reply":     bool(legacy.get("in_reply_to_status_id_str")),
-        "is_retweet":   "retweeted_status_result" in legacy,
-        "is_quote":     "quoted_status_id_str" in legacy,
-        "media":        _parse_media(legacy),
-        "url":          f"https://x.com/i/web/status/{tweet_id}",
-        "platform":     "twitter",
+        "id": tweet_id,
+        "text": text,
+        "author": tweet_author or {},
+        "created_at": legacy.get("created_at"),
+        "likes": likes,
+        "retweets": retweets,
+        "replies": replies,
+        "quotes": quotes,
+        "views": views,
+        "bookmarks": bookmarks,
+        "lang": legacy.get("lang"),
+        "is_reply": bool(legacy.get("in_reply_to_status_id_str")),
+        "is_retweet": "retweeted_status_result" in legacy,
+        "is_quote": "quoted_status_id_str" in legacy,
+        "media": _parse_media(legacy),
+        "url": f"https://x.com/i/web/status/{tweet_id}",
+        "platform": "twitter",
     }
 
 
-def _parse_media(legacy: Dict) -> List[Dict]:
+def _parse_media(legacy: Dict[str, Any]) -> List[Dict[str, Any]]:
     entities = legacy.get("extended_entities", legacy.get("entities", {}))
     media_list = entities.get("media", [])
     result = []
     for m in media_list:
         entry: Dict[str, Any] = {
             "type": m.get("type"),
-            "url":  m.get("media_url_https"),
+            "url": m.get("media_url_https"),
         }
         if m.get("type") == "video":
             variants = (m.get("video_info", {}).get("variants", []))
@@ -146,9 +158,9 @@ def _parse_media(legacy: Dict) -> List[Dict]:
     return result
 
 
-def _parse_user_list(instructions: List) -> tuple[List[Dict], Optional[str]]:
+def _parse_user_list(instructions: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """Extrae usuarios y cursor de las instrucciones de una timeline GraphQL."""
-    users: List[Dict] = []
+    users: List[Dict[str, Any]] = []
     cursor: Optional[str] = None
 
     for instruction in instructions:
@@ -156,7 +168,7 @@ def _parse_user_list(instructions: List) -> tuple[List[Dict], Optional[str]]:
         if "AddEntries" in itype or "TimelineAddEntries" in itype:
             for entry in instruction.get("entries", []):
                 entry_id = entry.get("entryId", "")
-                content  = entry.get("content", {})
+                content = entry.get("content", {})
 
                 if entry_id.startswith("cursor-bottom"):
                     cursor = (
@@ -175,9 +187,9 @@ def _parse_user_list(instructions: List) -> tuple[List[Dict], Optional[str]]:
     return users, cursor
 
 
-def _parse_tweet_list(instructions: List) -> tuple[List[Dict], Optional[str]]:
+def _parse_tweet_list(instructions: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """Extrae tweets y cursor de las instrucciones de una timeline GraphQL."""
-    tweets: List[Dict] = []
+    tweets: List[Dict[str, Any]] = []
     cursor: Optional[str] = None
 
     for instruction in instructions:
@@ -187,7 +199,7 @@ def _parse_tweet_list(instructions: List) -> tuple[List[Dict], Optional[str]]:
 
         for entry in instruction.get("entries", []):
             entry_id = entry.get("entryId", "")
-            content  = entry.get("content", {})
+            content = entry.get("content", {})
 
             # Cursor para paginacion
             if "cursor-bottom" in entry_id or "cursor-top" in entry_id:
@@ -214,9 +226,21 @@ def _parse_tweet_list(instructions: List) -> tuple[List[Dict], Optional[str]]:
     return tweets, cursor
 
 
+def _instructions_from_data(data: Dict[str, Any], path: List[str]) -> List[Dict[str, Any]]:
+    """Navega por la respuesta GraphQL y devuelve las instructions."""
+    node = data.get("data", {})
+    for key in path:
+        if not isinstance(node, dict):
+            return []
+        node = node.get(key, {})
+    if not isinstance(node, dict):
+        return []
+    return node.get("instructions", [])
+
+
 # ─── Scrapers de perfil ───────────────────────────────────────────────────────
 
-async def scrape_profile(client: TwitterClient, username: str) -> Dict:
+async def scrape_profile(client: TwitterClient, username: str) -> Dict[str, Any]:
     """Obtiene el perfil de un usuario por @username."""
     data = await client.graphql(
         "UserByScreenName",
@@ -247,9 +271,9 @@ async def _paginate_users(
     endpoint: str,
     user_id: str,
     limit: int = 100,
-) -> List[Dict]:
-    """Paginador generico para followers/following."""
-    all_users: List[Dict] = []
+) -> List[Dict[str, Any]]:
+    """Paginador generico para followers/following/favoriters/retweeters."""
+    all_users: List[Dict[str, Any]] = []
     cursor: Optional[str] = None
 
     while len(all_users) < limit:
@@ -294,32 +318,20 @@ async def get_user_id(client: TwitterClient, username: str) -> str:
     return uid
 
 
-async def scrape_followers(
-    client: TwitterClient,
-    username: str,
-    limit: int = 100,
-) -> List[Dict]:
+async def scrape_followers(client: TwitterClient, username: str, limit: int = 100) -> List[Dict[str, Any]]:
     user_id = await get_user_id(client, username)
     return await _paginate_users(client, "Followers", user_id, limit)
 
 
-async def scrape_following(
-    client: TwitterClient,
-    username: str,
-    limit: int = 100,
-) -> List[Dict]:
+async def scrape_following(client: TwitterClient, username: str, limit: int = 100) -> List[Dict[str, Any]]:
     user_id = await get_user_id(client, username)
     return await _paginate_users(client, "Following", user_id, limit)
 
 
-async def scrape_non_followers(
-    client: TwitterClient,
-    username: str,
-    limit: int = 200,
-) -> List[Dict]:
+async def scrape_non_followers(client: TwitterClient, username: str, limit: int = 200) -> List[Dict[str, Any]]:
     """Retorna los usuarios que sigues pero que no te siguen de vuelta."""
     following = await scrape_following(client, username, limit=limit)
-    followers  = await scrape_followers(client, username, limit=limit)
+    followers = await scrape_followers(client, username, limit=limit)
     follower_ids = {u["id"] for u in followers if u.get("id")}
     return [u for u in following if u.get("id") not in follower_ids]
 
@@ -331,10 +343,10 @@ async def scrape_tweets(
     username: str,
     limit: int = 50,
     include_replies: bool = False,
-) -> List[Dict]:
-    user_id   = await get_user_id(client, username)
-    endpoint  = "UserTweetsAndReplies" if include_replies else "UserTweets"
-    all_tweets: List[Dict] = []
+) -> List[Dict[str, Any]]:
+    user_id = await get_user_id(client, username)
+    endpoint = "UserTweetsAndReplies" if include_replies else "UserTweets"
+    all_tweets: List[Dict[str, Any]] = []
     cursor: Optional[str] = None
 
     while len(all_tweets) < limit:
@@ -370,18 +382,304 @@ async def scrape_tweets(
     return all_tweets[:limit]
 
 
+async def get_user_likes(
+    client: TwitterClient,
+    username: str,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """Obtiene los tweets que le gustaron a un usuario (públicos)."""
+    user_id = await get_user_id(client, username)
+    all_tweets: List[Dict[str, Any]] = []
+    cursor: Optional[str] = None
+
+    while len(all_tweets) < limit:
+        variables: Dict[str, Any] = {
+            "userId": user_id,
+            "count": min(40, limit - len(all_tweets)),
+            "includePromotedContent": False,
+            "withClientEventToken": False,
+            "withBirdwatchNotes": True,
+            "withVoice": True,
+            "withV2Timeline": True,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+
+        data = await client.graphql("UserLikes", variables=variables)
+        timeline = (
+            data.get("data", {})
+                .get("user", {})
+                .get("result", {})
+                .get("timeline_v2", {})
+                .get("timeline", {})
+        )
+        instructions = timeline.get("instructions", [])
+        batch, new_cursor = _parse_tweet_list(instructions)
+
+        all_tweets.extend(batch)
+        if not new_cursor or new_cursor == cursor or not batch:
+            break
+        cursor = new_cursor
+
+    return all_tweets[:limit]
+
+
+# ─── Replies y thread ───────────────────────────────────────────────────────────
+
+async def get_tweet_replies(
+    client: TwitterClient,
+    tweet_id: str,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """Obtiene replies/conversación de un tweet vía TweetDetail."""
+    all_tweets: List[Dict[str, Any]] = []
+    cursor: Optional[str] = None
+
+    while len(all_tweets) < limit:
+        variables: Dict[str, Any] = {
+            "focalTweetId": tweet_id,
+            "with_rux_injections": False,
+            "includePromotedContent": True,
+            "withCommunity": True,
+            "withQuickPromoteEligibilityTweetFields": True,
+            "withBirdwatchNotes": True,
+            "withVoice": True,
+            "withV2Timeline": True,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+
+        data = await client.graphql(
+            "TweetDetail",
+            variables=variables,
+            features={
+                **DEFAULT_FEATURES,
+                "rweb_lists_timeline_redesign_enabled": True,
+                "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+                "tweet_gql_enabled": True,
+                "responsive_web_enhance_cards_enabled": False,
+            },
+        )
+
+        instructions = _instructions_from_data(
+            data,
+            ["threaded_conversation_with_injections_v2", "instructions"],
+        )
+        if not instructions:
+            # Fallback a otros paths posibles
+            instructions = _instructions_from_data(
+                data,
+                ["tweet", "result", "timeline_response", "timeline", "instructions"],
+            )
+
+        batch, new_cursor = _parse_tweet_list(instructions)
+        all_tweets.extend(batch)
+
+        if not new_cursor or new_cursor == cursor or not batch:
+            break
+        cursor = new_cursor
+
+    return all_tweets[:limit]
+
+
+# ─── Engagement: favoriters y retweeters ──────────────────────────────────────
+
+async def get_tweet_favoriters(
+    client: TwitterClient,
+    tweet_id: str,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Obtiene usuarios que dieron like a un tweet."""
+    all_users: List[Dict[str, Any]] = []
+    cursor: Optional[str] = None
+
+    while len(all_users) < limit:
+        variables: Dict[str, Any] = {
+            "tweetId": tweet_id,
+            "count": min(20, limit - len(all_users)),
+            "includePromotedContent": False,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+
+        data = await client.graphql("Favoriters", variables=variables)
+        timeline = (
+            data.get("data", {})
+                .get("favoriters_timeline", {})
+                .get("timeline", {})
+                .get("instructions", [])
+        )
+        batch, new_cursor = _parse_user_list(timeline)
+        all_users.extend(batch)
+
+        if not new_cursor or new_cursor == cursor or not batch:
+            break
+        cursor = new_cursor
+
+    return all_users[:limit]
+
+
+async def get_tweet_retweeters(
+    client: TwitterClient,
+    tweet_id: str,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Obtiene usuarios que hicieron retweet a un tweet."""
+    all_users: List[Dict[str, Any]] = []
+    cursor: Optional[str] = None
+
+    while len(all_users) < limit:
+        variables: Dict[str, Any] = {
+            "tweetId": tweet_id,
+            "count": min(20, limit - len(all_users)),
+            "includePromotedContent": False,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+
+        data = await client.graphql("Retweeters", variables=variables)
+        timeline = (
+            data.get("data", {})
+                .get("retweeters_timeline", {})
+                .get("timeline", {})
+                .get("instructions", [])
+        )
+        batch, new_cursor = _parse_user_list(timeline)
+        all_users.extend(batch)
+
+        if not new_cursor or new_cursor == cursor or not batch:
+            break
+        cursor = new_cursor
+
+    return all_users[:limit]
+
+
+# ─── Bookmarks ──────────────────────────────────────────────────────────────────
+
+async def get_bookmarks(
+    client: TwitterClient,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """Obtiene los bookmarks del usuario autenticado. Requiere auth."""
+    if not client.is_authenticated():
+        raise TwitterError("Bookmarks requiere autenticación")
+
+    all_tweets: List[Dict[str, Any]] = []
+    cursor: Optional[str] = None
+
+    while len(all_tweets) < limit:
+        variables: Dict[str, Any] = {
+            "count": min(20, limit - len(all_tweets)),
+            "includePromotedContent": False,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+
+        data = await client.graphql(
+            "Bookmarks",
+            variables=variables,
+            features={
+                **DEFAULT_FEATURES,
+                "graphql_timeline_v2_bookmark_timeline": True,
+            },
+        )
+        timeline = (
+            data.get("data", {})
+                .get("bookmark_timeline_v2", {})
+                .get("timeline", {})
+                .get("instructions", [])
+        )
+        batch, new_cursor = _parse_tweet_list(timeline)
+        all_tweets.extend(batch)
+
+        if not new_cursor or new_cursor == cursor or not batch:
+            break
+        cursor = new_cursor
+
+    return all_tweets[:limit]
+
+
+# ─── Home timeline ────────────────────────────────────────────────────────────
+
+async def get_home_timeline(
+    client: TwitterClient,
+    limit: int = 50,
+    latest: bool = False,
+) -> List[Dict[str, Any]]:
+    """Obtiene el home timeline del usuario autenticado. Requiere auth."""
+    if not client.is_authenticated():
+        raise TwitterError("Home timeline requiere autenticación")
+
+    endpoint = "HomeLatestTimeline" if latest else "HomeTimeline"
+    all_tweets: List[Dict[str, Any]] = []
+    cursor: Optional[str] = None
+
+    while len(all_tweets) < limit:
+        variables: Dict[str, Any] = {
+            "count": min(20, limit - len(all_tweets)),
+            "includePromotedContent": True,
+            "latestControlAvailable": True,
+            "requestContext": "launch",
+            "withCommunity": True,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+
+        data = await client.graphql(endpoint, variables=variables)
+        timeline = (
+            data.get("data", {})
+                .get("home", {})
+                .get("home_timeline_urt", {})
+                .get("instructions", [])
+        )
+        batch, new_cursor = _parse_tweet_list(timeline)
+        all_tweets.extend(batch)
+
+        if not new_cursor or new_cursor == cursor or not batch:
+            break
+        cursor = new_cursor
+
+    return all_tweets[:limit]
+
+
+# ─── Trends ───────────────────────────────────────────────────────────────────
+
+async def get_trends(client: TwitterClient, woeid: int = 1) -> List[Dict[str, Any]]:
+    """
+    Obtiene trending topics de Twitter/X via REST API.
+    woeid: 1 = worldwide, 23424977 = USA, 44418 = London, etc.
+    """
+    data = await client.rest_get("/1.1/trends/place.json", params={"id": str(woeid)})
+    if not isinstance(data, list) or not data:
+        return []
+
+    trends = data[0].get("trends", [])
+    return [
+        {
+            "name": t.get("name"),
+            "query": t.get("query"),
+            "url": t.get("url"),
+            "tweet_volume": t.get("tweet_volume"),
+            "promoted": t.get("promoted_content") is not None,
+        }
+        for t in trends
+    ]
+
+
+# ─── Búsqueda ─────────────────────────────────────────────────────────────────
+
 async def search_tweets(
     client: TwitterClient,
     query: str,
     limit: int = 50,
-    mode: str = "Top",  # "Top" (con engagement) o "Latest" (mas recientes)
-) -> List[Dict]:
+    mode: str = "Top",
+) -> List[Dict[str, Any]]:
     """
     Busca tweets por query.
     mode="Top" devuelve tweets con mas engagement (likes, RTs).
     mode="Latest" devuelve los mas recientes (suelen tener menos engagement).
     """
-    all_tweets: List[Dict] = []
+    all_tweets: List[Dict[str, Any]] = []
     cursor: Optional[str] = None
 
     while len(all_tweets) < limit:
@@ -396,11 +694,9 @@ async def search_tweets(
 
         try:
             data = await client.graphql("SearchTimeline", variables=variables)
-        except TwitterError as e:
-            if "HTTP 403" in str(e) or "NoneType" in str(e):
-                # Twitter a veces da 403 en ciertas queries, retornar lo que tengamos
-                break
-            raise
+        except ForbiddenError:
+            # Twitter/X a veces bloquea ciertas queries; devolvemos lo recolectado.
+            break
 
         timeline = (
             data.get("data", {})
@@ -425,46 +721,29 @@ async def search_tweets(
 
 # ─── Wrapper sincrono (para uso facil desde otros proyectos) ───────────────────
 
+def _run_sync(coro):
+    """Ejecuta una corrutina en un loop nuevo y la cierra correctamente."""
+    return asyncio.run(coro)
+
+
+async def _with_client(cookies: str, coro):
+    async with TwitterClient(cookies=cookies) as client:
+        return await coro(client)
+
+
 def search_tweets_sync(
     cookies: str,
     query: str,
     limit: int = 50,
     mode: str = "Top",
-) -> List[Dict]:
-    """
-    Wrapper sincrono para buscar tweets. No requiere asyncio.
-    Uso: search_tweets_sync("auth_token=xxx; ct0=yyy", "crypto Colombia", 20)
-    """
-    client = TwitterClient(cookies=cookies)
-    if not client.is_authenticated():
-        raise TwitterError("Cookies no validas: falta auth_token")
-
-    loop = asyncio.new_event_loop()
-    try:
-        asyncio.set_event_loop(loop)
-        results = loop.run_until_complete(
-            search_tweets(client, query=query, limit=limit, mode=mode)
-        )
-    finally:
-        loop.close()
-
-    return results
+) -> List[Dict[str, Any]]:
+    """Wrapper sincrono para buscar tweets. No requiere asyncio."""
+    return _run_sync(_with_client(cookies, lambda c: search_tweets(c, query=query, limit=limit, mode=mode)))
 
 
-def scrape_profile_sync(cookies: str, username: str) -> Dict:
+def scrape_profile_sync(cookies: str, username: str) -> Dict[str, Any]:
     """Wrapper sincrono para obtener perfil de usuario."""
-    client = TwitterClient(cookies=cookies)
-    if not client.is_authenticated():
-        raise TwitterError("Cookies no validas: falta auth_token")
-
-    loop = asyncio.new_event_loop()
-    try:
-        asyncio.set_event_loop(loop)
-        results = loop.run_until_complete(scrape_profile(client, username))
-    finally:
-        loop.close()
-
-    return results
+    return _run_sync(_with_client(cookies, lambda c: scrape_profile(c, username)))
 
 
 def scrape_tweets_sync(
@@ -472,19 +751,46 @@ def scrape_tweets_sync(
     username: str,
     limit: int = 50,
     include_replies: bool = False,
-) -> List[Dict]:
+) -> List[Dict[str, Any]]:
     """Wrapper sincrono para obtener tweets de un usuario."""
-    client = TwitterClient(cookies=cookies)
-    if not client.is_authenticated():
-        raise TwitterError("Cookies no validas: falta auth_token")
+    return _run_sync(_with_client(cookies, lambda c: scrape_tweets(c, username, limit, include_replies)))
 
-    loop = asyncio.new_event_loop()
-    try:
-        asyncio.set_event_loop(loop)
-        results = loop.run_until_complete(
-            scrape_tweets(client, username, limit, include_replies)
-        )
-    finally:
-        loop.close()
 
-    return results
+def get_user_likes_sync(cookies: str, username: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """Wrapper sincrono para obtener likes públicos de un usuario."""
+    return _run_sync(_with_client(cookies, lambda c: get_user_likes(c, username, limit)))
+
+
+def get_tweet_replies_sync(cookies: str, tweet_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """Wrapper sincrono para obtener replies de un tweet."""
+    return _run_sync(_with_client(cookies, lambda c: get_tweet_replies(c, tweet_id, limit)))
+
+
+def get_tweet_favoriters_sync(cookies: str, tweet_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+    """Wrapper sincrono para obtener usuarios que dieron like a un tweet."""
+    return _run_sync(_with_client(cookies, lambda c: get_tweet_favoriters(c, tweet_id, limit)))
+
+
+def get_tweet_retweeters_sync(cookies: str, tweet_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+    """Wrapper sincrono para obtener usuarios que retuitearon un tweet."""
+    return _run_sync(_with_client(cookies, lambda c: get_tweet_retweeters(c, tweet_id, limit)))
+
+
+def get_bookmarks_sync(cookies: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """Wrapper sincrono para obtener bookmarks del usuario autenticado."""
+    return _run_sync(_with_client(cookies, lambda c: get_bookmarks(c, limit)))
+
+
+def get_home_timeline_sync(cookies: str, limit: int = 50, latest: bool = False) -> List[Dict[str, Any]]:
+    """Wrapper sincrono para obtener el home timeline."""
+    return _run_sync(_with_client(cookies, lambda c: get_home_timeline(c, limit, latest)))
+
+
+def get_trends_sync(cookies: str, woeid: int = 1) -> List[Dict[str, Any]]:
+    """Wrapper sincrono para obtener trending topics."""
+    return _run_sync(_with_client(cookies, lambda c: get_trends(c, woeid)))
+
+
+def validate_cookies_sync(cookies: str) -> Dict[str, Any]:
+    """Wrapper sincrono para validar que las cookies funcionan."""
+    return _run_sync(_with_client(cookies, lambda c: c.validate_cookies()))

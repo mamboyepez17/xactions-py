@@ -7,6 +7,7 @@ No npm. No Puppeteer. Just `httpx` + Twitter/X internal GraphQL API.
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/deps-2-brightgreen?style=flat-square)
 ![npm free](https://img.shields.io/badge/npm-free-red?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-pytest%20%2B%20respx-blue?style=flat-square)
 
 ---
 
@@ -25,14 +26,17 @@ The original XActions is great but depends on npm, which has been the target of 
 
 ---
 
-## What's new in v1.1.0
+## What's new in v1.2.0
 
-- **Full metrics extraction**: `parse_tweet` now handles `TweetWithVisibilityResults` and extracts likes, retweets, replies, quotes, views, bookmarks from both `legacy` and `public_metrics` (API v2)
-- **`_safe_int()`**: robust metric parsing that handles None, strings, and edge cases without crashing
-- **Mode "Top" by default**: `search_tweets` now returns tweets with the most engagement (likes, RTs) instead of just the most recent ones
-- **Sync wrappers**: `search_tweets_sync()`, `scrape_profile_sync()`, `scrape_tweets_sync()` — no asyncio needed from the caller
-- **Better error handling**: HTTP 403 during search returns collected results instead of crashing
-- **Fixed `pyproject.toml`**: build-backend changed to `setuptools.build_meta` (the previous `setuptools.backends.legacy:build` didn't exist)
+- **Persistent HTTP client**: `TwitterClient` now reuses a single `httpx.AsyncClient` with HTTP/2 + connection pooling, dramatically reducing overhead
+- **Resilient retries**: automatic exponential backoff for network errors and rate limits (respects `x-rate-limit-reset` and `Retry-After`)
+- **New scrapers**: replies, likers, retweeters, user likes, bookmarks, home timeline, trending topics
+- **New actions**: `create_bookmark` / `delete_bookmark`
+- **Cookie validation**: `validate_cookies()` / `xactions validate` quickly checks if your session works
+- **CLI improvements**: `--cookies-file`, `--csv` export, `replies`, `likers`, `retweeters`, `likes`, `bookmarks`, `trends`, `home`, `bookmark`, `unbookmark`, `validate`
+- **Tests**: pytest + respx suite covering client retries, auth errors, parsing and timeline extraction
+- **Updated GraphQL query IDs**: synced with `twikit` endpoints for higher reliability
+- **Consistent defaults**: search CLI and API now default to `mode="Top"`
 
 ---
 
@@ -122,6 +126,11 @@ asyncio.run(main())
 ```bash
 # Profile
 python cli/xactions.py profile elonmusk
+python cli/xactions.py profile elonmusk --csv profile.csv
+
+# Validate cookies
+python cli/xactions.py validate
+python cli/xactions.py validate --cookies-file cookies.txt
 
 # Followers / Following
 python cli/xactions.py followers elonmusk --limit 100 --table
@@ -134,9 +143,23 @@ python cli/xactions.py non-followers YOUR_USERNAME --table
 python cli/xactions.py tweets elonmusk --limit 50 --table
 python cli/xactions.py search "artificial intelligence" --mode Top
 
+# Engagement & conversation
+python cli/xactions.py replies 1234567890 --limit 30 --table
+python cli/xactions.py likers 1234567890 --limit 100 --csv likers.csv
+python cli/xactions.py retweeters 1234567890 --limit 100
+python cli/xactions.py likes elonmusk --limit 50
+
+# Authenticated-only content
+python cli/xactions.py bookmarks --limit 50 --table
+python cli/xactions.py home --limit 50 --table
+python cli/xactions.py trends --table
+
 # Write actions (require auth_token)
 python cli/xactions.py post "Hello from xactions-py 🐍"
 python cli/xactions.py like 1234567890
+python cli/xactions.py unlike 1234567890
+python cli/xactions.py bookmark 1234567890
+python cli/xactions.py unbookmark 1234567890
 python cli/xactions.py follow jack
 python cli/xactions.py unfollow jack
 
@@ -207,17 +230,27 @@ TWITTER_COOKIES="auth_token=xxx; ct0=yyy" python src/mcp_tools/server.py
 | Tool | Description | Auth required |
 |---|---|---|
 | `x_set_cookies` | Configure session at runtime | No |
+| `x_validate_cookies` | Check if the session is valid | No |
 | `x_get_profile` | Get user profile | No |
 | `x_get_followers` | List followers | No* |
 | `x_get_following` | List following | No* |
 | `x_get_non_followers` | Who doesn't follow you back | No* |
 | `x_get_tweets` | Recent tweets from a user | No |
+| `x_get_user_likes` | Tweets liked by a user | No |
 | `x_search_tweets` | Search tweets by query | No |
+| `x_get_tweet_replies` | Replies/conversation of a tweet | No |
+| `x_get_tweet_favoriters` | Users who liked a tweet | No |
+| `x_get_tweet_retweeters` | Users who retweeted a tweet | No |
+| `x_get_bookmarks` | Authenticated user's bookmarks | ✅ Yes |
+| `x_get_home_timeline` | Authenticated user's home timeline | ✅ Yes |
+| `x_get_trends` | Trending topics | No |
 | `x_post_tweet` | Post a tweet | ✅ Yes |
 | `x_delete_tweet` | Delete a tweet | ✅ Yes |
 | `x_like_tweet` | Like a tweet | ✅ Yes |
 | `x_unlike_tweet` | Unlike a tweet | ✅ Yes |
 | `x_retweet` | Retweet | ✅ Yes |
+| `x_bookmark_tweet` | Bookmark a tweet | ✅ Yes |
+| `x_unbookmark_tweet` | Remove a bookmark | ✅ Yes |
 | `x_follow_user` | Follow a user | ✅ Yes |
 | `x_unfollow_user` | Unfollow a user | ✅ Yes |
 | `x_bulk_unfollow_non_followers` | Bulk unfollow non-followers | ✅ Yes |
@@ -233,16 +266,20 @@ xactions-py/
 ├── src/
 │   ├── scraper/
 │   │   ├── client.py       # TwitterClient — async HTTP with httpx
-│   │   └── scrapers.py     # profile, followers, tweets, search + sync wrappers
+│   │   └── scrapers.py     # profile, followers, tweets, search, replies, bookmarks, trends + sync wrappers
 │   ├── actions/
-│   │   └── actions.py      # like, follow, tweet, bulk_unfollow
+│   │   └── actions.py      # like, follow, tweet, bookmark, bulk_unfollow
 │   └── mcp_tools/
 │       └── server.py       # MCP server (FastMCP)
 ├── cli/
 │   └── xactions.py         # CLI (Click)
+├── tests/
+│   ├── test_client.py      # pytest + respx
+│   └── test_scrapers.py
 ├── .env.example
 ├── .gitignore
 ├── pyproject.toml
+├── CHANGELOG.md
 └── README.md
 ```
 
@@ -294,9 +331,18 @@ All endpoints tested and working:
 | `followers` | ✅ | Requires POST |
 | `following` | ✅ | Works with GET |
 | `non-followers` | ✅ | Combines followers + following |
+| `replies` | ✅ | Via TweetDetail |
+| `likers` | ✅ | Via Favoriters |
+| `retweeters` | ✅ | Via Retweeters |
+| `likes` | ✅ | User's public likes |
+| `bookmarks` | ✅ | Requires auth |
+| `home` | ✅ | Requires auth |
+| `trends` | ✅ | Via REST trends/place |
+| `validate` | ✅ | Via verify_credentials |
 | `bulk-unfollow` | ✅ | Works with --dry-run |
 | `post` | ✅ | Subject to daily tweet limits |
 | `like` | ✅ | Requires valid tweet ID |
+| `bookmark` | ✅ | Requires auth |
 
 ---
 

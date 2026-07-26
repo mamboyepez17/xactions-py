@@ -15,6 +15,7 @@ env/
 dist/
 build/
 .eggs/
+.pytest_cache/
 
 # Datos de salida
 *.json
