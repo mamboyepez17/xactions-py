@@ -5,9 +5,10 @@ No npm. No Puppeteer. Just `httpx` + Twitter/X internal GraphQL API.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
-![Dependencies](https://img.shields.io/badge/deps-2-brightgreen?style=flat-square)
+![Dependencies](https://img.shields.io/badge/deps-3-brightgreen?style=flat-square)
 ![npm free](https://img.shields.io/badge/npm-free-red?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-pytest%20%2B%20respx-blue?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-32%20passing-brightgreen?style=flat-square)
+![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?style=flat-square)
 
 ---
 
@@ -18,7 +19,7 @@ The original XActions is great but depends on npm, which has been the target of 
 | | XActions (original) | xactions-py |
 |---|---|---|
 | Runtime | Node.js + npm | Python 3.10+ |
-| Direct dependencies | ~100+ (npm) | **2** (httpx, click) |
+| Direct dependencies | ~100+ (npm) | **3** (httpx, click, python-dotenv) |
 | Supply chain risk | ⚠️ High | ✅ Minimal |
 | Headless browser | Puppeteer required | ❌ Not needed |
 | MCP server | ✅ | ✅ |
@@ -26,17 +27,28 @@ The original XActions is great but depends on npm, which has been the target of 
 
 ---
 
-## What's new in v1.2.0
+## What's new in v1.3.0
 
-- **Persistent HTTP client**: `TwitterClient` now reuses a single `httpx.AsyncClient` with HTTP/2 + connection pooling, dramatically reducing overhead
-- **Resilient retries**: automatic exponential backoff for network errors and rate limits (respects `x-rate-limit-reset` and `Retry-After`)
-- **New scrapers**: replies, likers, retweeters, user likes, bookmarks, home timeline, trending topics
-- **New actions**: `create_bookmark` / `delete_bookmark`
-- **Cookie validation**: `validate_cookies()` / `xactions validate` quickly checks if your session works
-- **CLI improvements**: `--cookies-file`, `--csv` export, `replies`, `likers`, `retweeters`, `likes`, `bookmarks`, `trends`, `home`, `bookmark`, `unbookmark`, `validate`
-- **Tests**: pytest + respx suite covering client retries, auth errors, parsing and timeline extraction
-- **Updated GraphQL query IDs**: synced with `twikit` endpoints for higher reliability
-- **Consistent defaults**: search CLI and API now default to `mode="Top"`
+- **📊 `analyze`**: engagement analytics for any account — averages, engagement rate (followers & views), top tweets, best hours/days to post
+- **📈 `track` / `history`**: SQLite metric snapshots over time (followers delta, tweet history) — pure stdlib, zero new deps
+- **👥 Multi-account pool**: `--cookies-file` with one cookie per line rotates accounts automatically on rate limits or dead cookies
+- **📎 Media upload**: `post "text" --media photo.jpg` (up to 4 images)
+- **🔁 Parallel non-followers**: followers + following fetched concurrently (~2x faster)
+- **⚡ user_id cache**: repeated lookups no longer hit the profile endpoint
+- **🤖 Auto `.env`**: CLI and MCP server load `.env` automatically
+- **📤 NDJSON export**: `--ndjson` alongside `--csv` and `--output`
+- **🧪 CI**: GitHub Actions (ruff + pytest on Python 3.10–3.13), 32 tests passing
+
+<details>
+<summary>v1.2.0 changes</summary>
+
+- Persistent `httpx.AsyncClient` with connection pooling, retries + rate-limit aware backoff
+- New scrapers: replies, likers, retweeters, user likes, bookmarks, home timeline, trends
+- Actions: `create_bookmark` / `delete_bookmark`; `validate_cookies()`
+- CLI: `--cookies-file`, `--csv`, `replies`, `likers`, `retweeters`, `likes`, `bookmarks`, `home`, `trends`, `bookmark`, `unbookmark`, `validate`
+- pytest + respx suite; GraphQL query IDs synced with twikit
+
+</details>
 
 ---
 
@@ -45,9 +57,9 @@ The original XActions is great but depends on npm, which has been the target of 
 ```bash
 git clone https://github.com/mamboyepez17/xactions-py
 cd xactions-py
-pip install httpx click
-# Optional: for MCP server
-pip install "mcp[cli]"
+pip install -e .
+# Optional: MCP server + dev tools
+pip install -e ".[mcp,dev]"
 ```
 
 With virtualenv (recommended on servers):
@@ -55,11 +67,11 @@ With virtualenv (recommended on servers):
 ```bash
 # Linux / macOS
 python3 -m venv .venv && source .venv/bin/activate
-pip install httpx click
+pip install -e .
 
 # Windows (PowerShell)
 python -m venv .venv; .venv\Scripts\Activate.ps1
-pip install httpx click
+pip install -e .
 ```
 
 ---
@@ -72,13 +84,27 @@ Get your cookies from **x.com → DevTools (F12) → Application → Cookies →
 
 ```bash
 cp .env.example .env
-# Fill in your values in .env
+# Fill in your values in .env — it loads automatically (v1.3.0+)
 
 # Or export directly:
 export TWITTER_COOKIES="auth_token=YOUR_TOKEN; ct0=YOUR_CT0"
 ```
 
 > **Note:** Use the full `ct0` value — the client handles CSRF token matching automatically.
+
+### Multi-account pool (v1.3.0)
+
+Put several accounts in a file, **one cookie string per line**, and the CLI rotates
+them automatically when one hits a rate limit or dies:
+
+```bash
+# cookies.txt
+auth_token=ACCOUNT1_TOKEN; ct0=ACCOUNT1_CT0
+auth_token=ACCOUNT2_TOKEN; ct0=ACCOUNT2_CT0
+
+python cli/xactions.py search "crypto" --cookies-file cookies.txt --limit 200
+python cli/xactions.py validate --cookies-file cookies.txt   # checks every account
+```
 
 ---
 
@@ -154,8 +180,18 @@ python cli/xactions.py bookmarks --limit 50 --table
 python cli/xactions.py home --limit 50 --table
 python cli/xactions.py trends --table
 
+# Analytics & tracking (v1.3.0)
+python cli/xactions.py analyze elonmusk --limit 100
+python cli/xactions.py track elonmusk          # snapshot to SQLite
+python cli/xactions.py history elonmusk        # follower evolution
+
+# Export formats
+python cli/xactions.py tweets elonmusk --csv tweets.csv
+python cli/xactions.py tweets elonmusk --ndjson tweets.ndjson
+
 # Write actions (require auth_token)
 python cli/xactions.py post "Hello from xactions-py 🐍"
+python cli/xactions.py post "With image" --media photo.jpg --media meme.png
 python cli/xactions.py like 1234567890
 python cli/xactions.py unlike 1234567890
 python cli/xactions.py bookmark 1234567890
@@ -244,6 +280,7 @@ TWITTER_COOKIES="auth_token=xxx; ct0=yyy" python src/mcp_tools/server.py
 | `x_get_bookmarks` | Authenticated user's bookmarks | ✅ Yes |
 | `x_get_home_timeline` | Authenticated user's home timeline | ✅ Yes |
 | `x_get_trends` | Trending topics | No |
+| `x_analyze_user` | Engagement analytics for a user | No |
 | `x_post_tweet` | Post a tweet | ✅ Yes |
 | `x_delete_tweet` | Delete a tweet | ✅ Yes |
 | `x_like_tweet` | Like a tweet | ✅ Yes |
@@ -266,16 +303,21 @@ xactions-py/
 ├── src/
 │   ├── scraper/
 │   │   ├── client.py       # TwitterClient — async HTTP with httpx
+│   │   ├── pool.py         # ClientPool — multi-account rotation
 │   │   └── scrapers.py     # profile, followers, tweets, search, replies, bookmarks, trends + sync wrappers
 │   ├── actions/
-│   │   └── actions.py      # like, follow, tweet, bookmark, bulk_unfollow
+│   │   └── actions.py      # like, follow, tweet, bookmark, media upload, bulk_unfollow
+│   ├── analytics/
+│   │   └── analyzer.py     # engagement analytics (pure stdlib)
+│   ├── storage/
+│   │   └── db.py           # SQLite metric tracking
 │   └── mcp_tools/
 │       └── server.py       # MCP server (FastMCP)
 ├── cli/
 │   └── xactions.py         # CLI (Click)
-├── tests/
-│   ├── test_client.py      # pytest + respx
-│   └── test_scrapers.py
+├── tests/                  # pytest + respx (32 tests)
+├── .github/workflows/
+│   └── ci.yml              # ruff + pytest on 3.10–3.13
 ├── .env.example
 ├── .gitignore
 ├── pyproject.toml

@@ -5,13 +5,11 @@ import pytest
 import respx
 
 from src.scraper.client import (
-    TwitterClient,
-    TwitterError,
-    RateLimitError,
+    BEARER_TOKEN,
     AuthError,
     ForbiddenError,
-    NotFoundError,
-    BEARER_TOKEN,
+    RateLimitError,
+    TwitterClient,
 )
 
 

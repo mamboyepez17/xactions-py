@@ -18,7 +18,7 @@ import json
 import logging
 import random
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 from urllib.parse import unquote
 
 import httpx
@@ -32,6 +32,7 @@ BEARER_TOKEN = (
 GRAPHQL_BASE = "https://x.com/i/api/graphql"
 REST_BASE = "https://x.com/i/api"
 API_BASE = "https://api.x.com"
+UPLOAD_BASE = "https://upload.x.com"
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -41,7 +42,7 @@ USER_AGENTS = [
 ]
 
 # ─── GraphQL endpoints (reverse-engineered, actualizados desde twikit) ─────────
-GRAPHQL_ENDPOINTS: Dict[str, Dict[str, Any]] = {
+GRAPHQL_ENDPOINTS: dict[str, dict[str, Any]] = {
     "UserByScreenName": {"queryId": "NimuplG1OB7Fd2btCLdBOw", "operationName": "UserByScreenName"},
     "UserByRestId": {"queryId": "tD8zKvQzwY3kdx5yz6YmOw", "operationName": "UserByRestId"},
     "UserTweets": {"queryId": "QWF3SzpHmykQHsQMixG0cg", "operationName": "UserTweets"},
@@ -139,29 +140,29 @@ class TwitterClient:
 
     def __init__(
         self,
-        cookies: Optional[str] = None,
-        proxy: Optional[str] = None,
+        cookies: str | None = None,
+        proxy: str | None = None,
         max_retries: int = 3,
         timeout: float = 30.0,
-        user_agent: Optional[str] = None,
+        user_agent: str | None = None,
     ):
         self._cookie_str = cookies or ""
-        self._cookies: Dict[str, str] = {}
+        self._cookies: dict[str, str] = {}
         self._proxy = proxy
         self._max_retries = max(0, max_retries)
         self._timeout = timeout
         self._user_agent = user_agent or random.choice(USER_AGENTS)
-        self._csrf_token: Optional[str] = None
-        self._client: Optional[httpx.AsyncClient] = None
+        self._csrf_token: str | None = None
+        self._client: httpx.AsyncClient | None = None
         self._closed = False
-        self._last_rate_limit_reset: Optional[int] = None
+        self._last_rate_limit_reset: int | None = None
 
         if cookies:
             self._parse_cookies(cookies)
 
     # ─── Ciclo de vida ─────────────────────────────────────────────────────────
 
-    async def __aenter__(self) -> "TwitterClient":
+    async def __aenter__(self) -> TwitterClient:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -224,8 +225,8 @@ class TwitterClient:
     def is_authenticated(self) -> bool:
         return bool(self._cookies.get("auth_token"))
 
-    def _build_headers(self, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-        headers: Dict[str, str] = {
+    def _build_headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        headers: dict[str, str] = {
             "Authorization": f"Bearer {BEARER_TOKEN}",
             "User-Agent": self._user_agent,
             "Accept": "*/*",
@@ -248,7 +249,7 @@ class TwitterClient:
 
     # ─── Requests ────────────────────────────────────────────────────────────────
 
-    def _retry_delay(self, attempt: int, response: Optional[httpx.Response] = None) -> float:
+    def _retry_delay(self, attempt: int, response: httpx.Response | None = None) -> float:
         """Calcula segundos de espera antes de reintentar."""
         if response is not None and response.status_code == 429:
             # Twitter usa x-rate-limit-reset (timestamp unix) o retry-after.
@@ -276,15 +277,15 @@ class TwitterClient:
         self,
         method: str,
         url: str,
-        headers: Optional[Dict[str, str]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        json_payload: Optional[Dict[str, Any]] = None,
-        data_payload: Optional[Dict[str, Any]] = None,
+        headers: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
+        json_payload: dict[str, Any] | None = None,
+        data_payload: dict[str, Any] | None = None,
         allow_replay: bool = True,
     ) -> httpx.Response:
         """Request base con reintentos, rate-limit handling y logging."""
         request_headers = self._build_headers(headers)
-        last_exception: Optional[Exception] = None
+        last_exception: Exception | None = None
 
         for attempt in range(self._max_retries + 1):
             try:
@@ -334,10 +335,10 @@ class TwitterClient:
     async def graphql(
         self,
         endpoint_name: str,
-        variables: Dict[str, Any],
-        features: Optional[Dict[str, Any]] = None,
+        variables: dict[str, Any],
+        features: dict[str, Any] | None = None,
         mutation: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Ejecuta una query o mutation GraphQL contra la API interna de Twitter."""
         ep = GRAPHQL_ENDPOINTS[endpoint_name]
         query_id = ep["queryId"]
@@ -386,13 +387,13 @@ class TwitterClient:
 
     # ─── REST helpers ────────────────────────────────────────────────────────────
 
-    async def rest_get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def rest_get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """GET a un endpoint REST (ej. verify_credentials)."""
         url = f"{REST_BASE}{path}"
         resp = await self._request("GET", url, params=params)
         return resp.json()
 
-    async def rest_post(self, path: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def rest_post(self, path: str, data: dict[str, Any]) -> dict[str, Any]:
         """POST a un endpoint REST (usado para follow/unfollow)."""
         url = f"{REST_BASE}{path}"
         resp = await self._request(
@@ -403,9 +404,45 @@ class TwitterClient:
         )
         return resp.json()
 
+    async def rest_upload(
+        self,
+        url: str,
+        file_path: str,
+        extra_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Sube un archivo binario via multipart/form-data (media upload).
+        No usa _request porque multipart no puede reintentarse de forma segura
+        y requiere headers distintos (httpx pone el boundary solo).
+        """
+        if self._closed:
+            raise TwitterError("El cliente está cerrado")
+        import os
+
+        filename = os.path.basename(file_path)
+        with open(file_path, "rb") as f:
+            files = {"media": (filename, f)}
+            resp = await self._http.post(
+                url,
+                headers=self._build_headers(),
+                files=files,
+                data=extra_data or {},
+            )
+
+        if resp.status_code == 401:
+            raise AuthError("No autenticado para subir media")
+        if resp.status_code == 403:
+            raise ForbiddenError(f"Acceso denegado al subir media: {resp.text[:200]}")
+        if resp.status_code == 429:
+            raise RateLimitError("Rate limited al subir media")
+        if resp.status_code >= 400:
+            raise TwitterError(f"HTTP {resp.status_code} al subir media: {resp.text[:300]}")
+
+        return resp.json()
+
     # ─── Validación de sesión ────────────────────────────────────────────────────
 
-    async def validate_cookies(self) -> Dict[str, Any]:
+    async def validate_cookies(self) -> dict[str, Any]:
         """
         Verifica que las cookies sean válidas haciendo una petición autenticada.
         Devuelve información básica de la cuenta o lanza AuthError/ForbiddenError.

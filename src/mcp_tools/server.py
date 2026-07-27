@@ -11,52 +11,57 @@ v1.2.0:
 
 from __future__ import annotations
 
-import os
 import json
 import logging
-from typing import Optional
+import os
 
-from mcp.server.fastmcp import FastMCP
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Importar cliente y scrapers
 import sys
+
+from mcp.server.fastmcp import FastMCP
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from scraper.client import (
-    TwitterClient,
-    TwitterError,
-    AuthError,
-    RateLimitError,
-    NotFoundError,
-    ForbiddenError,
-)
-from scraper.scrapers import (
-    scrape_profile,
-    scrape_followers,
-    scrape_following,
-    scrape_non_followers,
-    scrape_tweets,
-    search_tweets,
-    get_user_id,
-    get_user_likes,
-    get_tweet_replies,
-    get_tweet_favoriters,
-    get_tweet_retweeters,
-    get_bookmarks,
-    get_trends,
-    get_home_timeline,
-)
 from actions.actions import (
-    post_tweet,
-    delete_tweet,
-    like_tweet,
-    unlike_tweet,
-    retweet,
-    follow_user,
-    unfollow_user,
     bulk_unfollow,
     create_bookmark,
     delete_bookmark,
+    delete_tweet,
+    follow_user,
+    like_tweet,
+    post_tweet,
+    retweet,
+    unfollow_user,
+    unlike_tweet,
+)
+from scraper.client import (
+    AuthError,
+    ForbiddenError,
+    NotFoundError,
+    RateLimitError,
+    TwitterClient,
+    TwitterError,
+)
+from scraper.pool import ClientPool
+from scraper.scrapers import (
+    get_bookmarks,
+    get_home_timeline,
+    get_trends,
+    get_tweet_favoriters,
+    get_tweet_replies,
+    get_tweet_retweeters,
+    get_user_id,
+    get_user_likes,
+    scrape_followers,
+    scrape_following,
+    scrape_non_followers,
+    scrape_profile,
+    scrape_tweets,
+    search_tweets,
 )
 
 # ─── Inicialización ───────────────────────────────────────────────────────────
@@ -70,15 +75,23 @@ mcp = FastMCP(
 
 _cookies = os.getenv("TWITTER_COOKIES", "")
 _proxy = os.getenv("TWITTER_PROXY")
-_client: Optional[TwitterClient] = None
+_client: TwitterClient | ClientPool | None = None
+_client_key: str | None = None
 
 
-def get_client(cookies: Optional[str] = None) -> TwitterClient:
-    """Retorna el cliente singleton, reconfigurándolo si se pasan cookies nuevas."""
-    global _client
-    effective_cookies = cookies or _cookies
-    if _client is None or (cookies and cookies != _client._cookie_str):
-        _client = TwitterClient(cookies=effective_cookies, proxy=_proxy)
+def get_client(cookies: str | None = None) -> TwitterClient | ClientPool:
+    """
+    Retorna el cliente singleton, reconfigurándolo si se pasan cookies nuevas.
+    Si hay varias cookies (separadas por '|||' o salto de línea) crea un pool.
+    """
+    global _client, _client_key
+    effective = cookies or _cookies
+    if _client is None or effective != _client_key:
+        parts = [c.strip() for c in effective.replace("\n", "|||").split("|||") if c.strip()]
+        _client = ClientPool(parts, proxy=_proxy) if len(parts) > 1 else TwitterClient(
+            cookies=parts[0] if parts else "", proxy=_proxy
+        )
+        _client_key = effective
     return _client
 
 
@@ -324,6 +337,27 @@ async def x_get_home_timeline(limit: int = 50, latest: bool = False) -> str:
 
 
 @mcp.tool()
+async def x_analyze_user(username: str, limit: int = 100) -> str:
+    """
+    Analiza el engagement de un usuario: promedios, engagement rate,
+    top tweets, mejores horas y días para publicar.
+    username: nombre de usuario sin @
+    limit: cuántos tweets recientes analizar (default 100)
+    """
+    try:
+        from analytics.analyzer import analyze_tweets
+
+        client = get_client()
+        profile = await scrape_profile(client, username)
+        tweets = await scrape_tweets(client, username, limit=limit)
+        report = analyze_tweets(tweets, profile=profile)
+        report["username"] = username
+        return json.dumps(report, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
 async def x_get_trends(woeid: int = 1) -> str:
     """Obtiene trending topics. woeid=1 es worldwide."""
     try:
@@ -340,7 +374,7 @@ async def x_get_trends(woeid: int = 1) -> str:
 @mcp.tool()
 async def x_post_tweet(
     text: str,
-    reply_to_id: Optional[str] = None,
+    reply_to_id: str | None = None,
 ) -> str:
     """
     Publica un tweet. Requiere autenticación (auth_token).

@@ -13,11 +13,11 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from typing import Any, Optional
+from typing import Any
 
 # Permitir importaciones absolutas desde src/ cuando se ejecuta el CLI/scripts.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from scraper.client import TwitterClient, AuthError
+from scraper.client import UPLOAD_BASE, AuthError, TwitterClient
 
 
 def _require_auth(client: TwitterClient) -> None:
@@ -25,20 +25,38 @@ def _require_auth(client: TwitterClient) -> None:
         raise AuthError("Se requiere autenticación. Configura auth_token y ct0.")
 
 
+# ─── Media upload ─────────────────────────────────────────────────────────────
+
+async def upload_media(client: TwitterClient, file_path: str) -> dict[str, Any]:
+    """
+    Sube una imagen (jpg/png/gif/webp) a Twitter y devuelve su media_id.
+    Requiere auth. Límite simple upload: ~5MB por imagen.
+    (Los videos requieren chunked upload INIT/APPEND/FINALIZE — no soportado aún.)
+    """
+    _require_auth(client)
+    data = await client.rest_upload(f"{UPLOAD_BASE}/1.1/media/upload.json", file_path)
+    media_id = data.get("media_id_string") or str(data.get("media_id", ""))
+    if not media_id:
+        raise AuthError(f"No se obtuvo media_id: {data}")
+    return {"success": True, "media_id": media_id, "size": data.get("size")}
+
+
 # ─── Tweets ───────────────────────────────────────────────────────────────────
 
 async def post_tweet(
     client: TwitterClient,
     text: str,
-    reply_to_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Publica un tweet. Requiere auth."""
+    reply_to_id: str | None = None,
+    media_ids: list | None = None,
+) -> dict[str, Any]:
+    """Publica un tweet (con media opcional). Requiere auth."""
     _require_auth(client)
 
+    media_entities = [{"media_id": mid, "tagged_users": []} for mid in (media_ids or [])]
     variables = {
         "tweet_text": text,
         "dark_request": False,
-        "media": {"media_entities": [], "possibly_sensitive": False},
+        "media": {"media_entities": media_entities, "possibly_sensitive": False},
         "semantic_annotation_ids": [],
     }
     if reply_to_id:
@@ -57,7 +75,7 @@ async def post_tweet(
     return {"success": bool(result), "tweet_id": result.get("rest_id")}
 
 
-async def delete_tweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
+async def delete_tweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "DeleteTweet",
@@ -69,7 +87,7 @@ async def delete_tweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
 
 # ─── Engagement ─────────────────────────────────────────────────────────────
 
-async def like_tweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
+async def like_tweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "FavoriteTweet",
@@ -79,7 +97,7 @@ async def like_tweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
     return {"success": data.get("data", {}).get("favorite_tweet") == "Done"}
 
 
-async def unlike_tweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
+async def unlike_tweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "UnfavoriteTweet",
@@ -89,7 +107,7 @@ async def unlike_tweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
     return {"success": data.get("data", {}).get("unfavorite_tweet") == "Done"}
 
 
-async def retweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
+async def retweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "CreateRetweet",
@@ -100,7 +118,7 @@ async def retweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
     return {"success": bool(result)}
 
 
-async def unretweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
+async def unretweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "DeleteRetweet",
@@ -112,7 +130,7 @@ async def unretweet(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
 
 # ─── Bookmarks ───────────────────────────────────────────────────────────────
 
-async def create_bookmark(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
+async def create_bookmark(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "CreateBookmark",
@@ -122,7 +140,7 @@ async def create_bookmark(client: TwitterClient, tweet_id: str) -> Dict[str, Any
     return {"success": "data" in data}
 
 
-async def delete_bookmark(client: TwitterClient, tweet_id: str) -> Dict[str, Any]:
+async def delete_bookmark(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(
         "DeleteBookmark",
@@ -134,7 +152,7 @@ async def delete_bookmark(client: TwitterClient, tweet_id: str) -> Dict[str, Any
 
 # ─── Follow / Unfollow ─────────────────────────────────────────────────────────
 
-async def follow_user(client: TwitterClient, user_id: str) -> Dict[str, Any]:
+async def follow_user(client: TwitterClient, user_id: str) -> dict[str, Any]:
     """Follow por user_id. Usa REST endpoint (no GraphQL mutation disponible)."""
     _require_auth(client)
     data = await client.rest_post(
@@ -144,7 +162,7 @@ async def follow_user(client: TwitterClient, user_id: str) -> Dict[str, Any]:
     return {"success": bool(data.get("id_str") or data.get("id"))}
 
 
-async def unfollow_user(client: TwitterClient, user_id: str) -> Dict[str, Any]:
+async def unfollow_user(client: TwitterClient, user_id: str) -> dict[str, Any]:
     """Unfollow por user_id."""
     _require_auth(client)
     data = await client.rest_post(
@@ -160,8 +178,8 @@ async def bulk_unfollow(
     client: TwitterClient,
     user_ids: list,
     delay_seconds: float = 2.0,
-    on_progress: Optional[callable] = None,
-) -> Dict[str, Any]:
+    on_progress: callable | None = None,
+) -> dict[str, Any]:
     """
     Hace unfollow masivo con delay entre cada acción para evitar rate limits.
     on_progress: callable(current, total, username) opcional.

@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.3.0 — 2026-07-27
+
+### Added
+- **Analytics**: new `src/analytics` module + `xactions analyze USERNAME` command — engagement averages, engagement rate (followers & views), top tweets by weighted score, best hours/days to post, content mix. Also available as MCP tool `x_analyze_user`.
+- **SQLite tracking**: new `src/storage` module (pure stdlib `sqlite3`) + commands `xactions track USERNAME` (snapshot metrics, show follower delta) and `xactions history USERNAME` (evolution table). DB lives at `~/.xactions/xactions.db` (override with `XACTIONS_DB` or `--db`).
+- **Multi-account pool**: new `ClientPool` (`src/scraper/pool.py`) with the same interface as `TwitterClient`. `--cookies-file` now accepts one cookie string per line and rotates accounts automatically on `RateLimitError`; accounts with `AuthError`/`ForbiddenError` are marked dead. `xactions validate` checks every account in the pool. MCP server also supports multiple cookies separated by `|||` or newlines.
+- **Media upload**: `upload_media()` action (v1.1 `media/upload.json`, images up to ~5MB) and `xactions post "text" --media photo.jpg` (up to 4 images).
+- **NDJSON export**: `--ndjson` flag on all read commands, alongside `--csv` and `--output`.
+- **`.env` auto-load**: CLI and MCP server call `load_dotenv()` at startup (`python-dotenv` is now a core dependency).
+- **user_id cache**: `get_user_id()` memoizes username → id in memory; `clear_user_id_cache()` available.
+- **CI**: GitHub Actions workflow running `ruff check` + `pytest` on Python 3.10–3.13.
+- Tests: 32 passing (analyzer, pool rotation, SQLite tracking, user_id cache, plus existing client/parser suites).
+
+### Changed
+- `scrape_non_followers()` fetches followers and following **concurrently** with `asyncio.gather` (~2x faster).
+- Ruff lint config in `pyproject.toml`; whole codebase passes `ruff check` (modernized type annotations to PEP 585/604).
+- `TwitterClient.rest_upload()` for multipart uploads.
+
 ## v1.2.0 — 2026-07-26
 
 ### Added

@@ -1,8 +1,17 @@
 """Tests para parsers y scrapers de xactions-py."""
 
-import pytest
+import httpx
+import respx
 
-from src.scraper.scrapers import parse_user, parse_tweet, _parse_tweet_list, _parse_user_list
+from src.scraper.client import TwitterClient
+from src.scraper.scrapers import (
+    _parse_tweet_list,
+    _parse_user_list,
+    clear_user_id_cache,
+    get_user_id,
+    parse_tweet,
+    parse_user,
+)
 
 
 def test_parse_user_minimal():
@@ -151,3 +160,28 @@ def test_safe_int_coerces_strings():
     assert _safe_int(None) == 0
     assert _safe_int("abc") == 0
     assert _safe_int("123", default=10) == 123
+
+
+@respx.mock
+async def test_get_user_id_uses_cache():
+    clear_user_id_cache()
+    profile_response = {
+        "data": {
+            "user": {
+                "result": {
+                    "rest_id": "44196397",
+                    "legacy": {"screen_name": "elonmusk", "name": "Elon Musk"},
+                }
+            }
+        }
+    }
+    route = respx.get(
+        "https://x.com/i/api/graphql/NimuplG1OB7Fd2btCLdBOw/UserByScreenName"
+    ).mock(return_value=httpx.Response(200, json=profile_response))
+
+    async with TwitterClient(cookies="auth_token=a; ct0=b") as client:
+        uid1 = await get_user_id(client, "elonmusk")
+        uid2 = await get_user_id(client, "ElonMusk")  # case-insensitive cache hit
+
+    assert uid1 == uid2 == "44196397"
+    assert route.call_count == 1  # el segundo lookup salió del cache
