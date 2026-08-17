@@ -11,6 +11,7 @@ v1.2.0:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 from typing import Any
@@ -18,6 +19,8 @@ from typing import Any
 # Permitir importaciones absolutas desde src/ cuando se ejecuta el CLI/scripts.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from scraper.client import UPLOAD_BASE, AuthError, TwitterClient
+
+_log = logging.getLogger(__name__)
 
 
 def _require_auth(client: TwitterClient) -> None:
@@ -195,8 +198,9 @@ async def bulk_unfollow(
                 success += 1
             else:
                 failed += 1
-        except Exception:
+        except Exception as e:
             failed += 1
+            _log.warning("bulk_unfollow: falló user_id=%s (%s)", uid, e)
 
         if on_progress:
             on_progress(i + 1, len(user_ids), uid)

@@ -18,6 +18,7 @@ import json
 import logging
 import random
 import time
+import uuid
 from typing import Any
 from urllib.parse import unquote
 
@@ -156,6 +157,7 @@ class TwitterClient:
         self._client: httpx.AsyncClient | None = None
         self._closed = False
         self._last_rate_limit_reset: int | None = None
+        self._client_uuid = str(uuid.uuid4())
 
         if cookies:
             self._parse_cookies(cookies)
@@ -187,11 +189,14 @@ class TwitterClient:
     def close(self) -> None:
         """Cierre síncrono (útil para wrappers sync)."""
         try:
-            loop = asyncio.get_running_loop()
-            loop.run_until_complete(self.aclose())
+            asyncio.get_running_loop()
         except RuntimeError:
             # No hay loop corriendo; usamos un loop nuevo.
             asyncio.run(self.aclose())
+        else:
+            # Hay un loop corriendo: no se puede bloquear; programamos el cierre.
+            loop = asyncio.get_event_loop()
+            loop.create_task(self.aclose())
 
     @property
     def _http(self) -> httpx.AsyncClient:
@@ -236,6 +241,8 @@ class TwitterClient:
             "Origin": "https://x.com",
             "x-twitter-active-user": "yes",
             "x-twitter-client-language": "en",
+            "x-client-uuid": self._client_uuid,
+            "x-client-transaction-id": str(uuid.uuid4()),
         }
         if self._csrf_token:
             headers["x-csrf-token"] = self._csrf_token
@@ -286,8 +293,11 @@ class TwitterClient:
         """Request base con reintentos, rate-limit handling y logging."""
         request_headers = self._build_headers(headers)
         last_exception: Exception | None = None
+        # Las mutations no se reintentan: un timeout tras ser procesada
+        # por el servidor duplicaría la acción (like, tweet, unfollow...).
+        max_attempts = 1 if not allow_replay else self._max_retries + 1
 
-        for attempt in range(self._max_retries + 1):
+        for attempt in range(max_attempts):
             try:
                 if method.upper() == "GET":
                     resp = await self._http.get(url, headers=request_headers, params=params)
@@ -298,8 +308,17 @@ class TwitterClient:
                 else:
                     resp = await self._http.post(url, headers=request_headers)
 
+                # Twitter rota el CSRF token en sesiones largas: si la respuesta
+                # trae un ct0 nuevo, lo adoptamos para las próximas peticiones.
+                new_ct0 = resp.cookies.get("ct0")
+                if new_ct0 and new_ct0 != self._csrf_token:
+                    self._csrf_token = new_ct0
+                    self._cookies["ct0"] = new_ct0
+                    self._cookie_str = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
+                    _log.debug("CSRF token actualizado desde la respuesta")
+
                 if resp.status_code == 429:
-                    if attempt < self._max_retries:
+                    if attempt < max_attempts - 1:
                         delay = self._retry_delay(attempt, resp)
                         await asyncio.sleep(delay)
                         continue
@@ -321,12 +340,12 @@ class TwitterClient:
 
             except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
                 last_exception = e
-                if attempt < self._max_retries:
+                if attempt < max_attempts - 1:
                     delay = 2.0 ** attempt
-                    _log.warning("Error de red en intento %d/%d: %s. Reintentando en %.1fs", attempt + 1, self._max_retries + 1, e, delay)
+                    _log.warning("Error de red en intento %d/%d: %s. Reintentando en %.1fs", attempt + 1, max_attempts, e, delay)
                     await asyncio.sleep(delay)
                     continue
-                raise TwitterError(f"Error de red tras {self._max_retries + 1} intentos: {e}")
+                raise TwitterError(f"Error de red tras {max_attempts} intentos: {e}")
 
         raise TwitterError(f"Max reintentos alcanzados: {last_exception}")
 
@@ -362,6 +381,7 @@ class TwitterClient:
                 url,
                 headers={"Content-Type": "application/json"},
                 json_payload=payload,
+                allow_replay=not mutation,
             )
         else:
             params = {

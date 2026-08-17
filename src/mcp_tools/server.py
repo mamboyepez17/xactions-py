@@ -11,6 +11,7 @@ v1.2.0:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -87,11 +88,15 @@ def get_client(cookies: str | None = None) -> TwitterClient | ClientPool:
     global _client, _client_key
     effective = cookies or _cookies
     if _client is None or effective != _client_key:
+        old = _client
         parts = [c.strip() for c in effective.replace("\n", "|||").split("|||") if c.strip()]
         _client = ClientPool(parts, proxy=_proxy) if len(parts) > 1 else TwitterClient(
             cookies=parts[0] if parts else "", proxy=_proxy
         )
         _client_key = effective
+        # Cerrar el cliente anterior (libera sockets) sin bloquear el loop.
+        if old is not None:
+            asyncio.get_running_loop().create_task(old.aclose())
     return _client
 
 
@@ -488,13 +493,19 @@ async def x_unbookmark_tweet(tweet_id: str) -> str:
 
 
 @mcp.tool()
-async def x_bulk_unfollow_non_followers(username: str, limit: int = 200, delay: float = 2.0) -> str:
+async def x_bulk_unfollow_non_followers(
+    username: str,
+    limit: int = 200,
+    delay: float = 2.0,
+    dry_run: bool = False,
+) -> str:
     """
     Hace unfollow masivo de todos los que no te siguen de vuelta.
     ÚSALO CON CUIDADO — hace cambios reales en tu cuenta.
     username: tu nombre de usuario sin @
     limit: cuántos following revisar (default 200)
     delay: segundos entre cada unfollow (default 2.0, no bajar de 1.0)
+    dry_run: si es True solo muestra quién sería unfollowed, sin hacer nada
     """
     try:
         client = get_client()
@@ -508,6 +519,13 @@ async def x_bulk_unfollow_non_followers(username: str, limit: int = 200, delay: 
         preview = ", ".join(names)
         if len(non_followers) > 5:
             preview += f" y {len(non_followers) - 5} más..."
+
+        if dry_run:
+            return (
+                f"🔍 DRY-RUN — no se hizo ningún unfollow.\n"
+                f"  Se haría unfollow de: {len(user_ids)} usuarios\n"
+                f"  Primeros: {preview}"
+            )
 
         result = await bulk_unfollow(client, user_ids, delay_seconds=delay)
 

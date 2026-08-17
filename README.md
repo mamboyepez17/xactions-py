@@ -7,7 +7,7 @@ No npm. No Puppeteer. Just `httpx` + Twitter/X internal GraphQL API.
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/deps-3-brightgreen?style=flat-square)
 ![npm free](https://img.shields.io/badge/npm-free-red?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-32%20passing-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-40%20passing-brightgreen?style=flat-square)
 ![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?style=flat-square)
 
 ---
@@ -27,7 +27,20 @@ The original XActions is great but depends on npm, which has been the target of 
 
 ---
 
-## What's new in v1.3.0
+## What's new in v1.4.0
+
+- **🛡️ Seguridad anti-duplicados**: las mutations ya no se reintentan ante errores de red (un timeout no puede duplicar un like/tweet)
+- **🔑 CSRF auto-refresh**: `ct0` se actualiza solo cuando X lo rota en sesiones largas
+- **🖥️ Headers modernos**: `x-client-uuid` + `x-client-transaction-id` en todas las peticiones
+- **🚨 Errores claros**: búsqueda bloqueada (403) falla con mensaje explícito; cuentas suspendidas devuelven `NotFoundError` descriptivo
+- **🧹 CLI refactorizado**: decorador `@with_client` (-~100 líneas de boilerplate), versión desde `importlib.metadata`
+- **🗄️ SQLite concurrente**: WAL + `busy_timeout` para trackear desde varios procesos
+- **🔍 MCP `dry_run`**: `x_bulk_unfollow_non_followers` permite previsualizar sin ejecutar
+- **🪟 CI en Windows**: matriz con `windows-latest` además de Linux
+- **🧪 40 tests** (8 nuevos: mutation no-retry, ct0 refresh, `close()` en loop, CLI)
+
+<details>
+<summary>v1.3.0 changes</summary>
 
 - **📊 `analyze`**: engagement analytics for any account — averages, engagement rate (followers & views), top tweets, best hours/days to post
 - **📈 `track` / `history`**: SQLite metric snapshots over time (followers delta, tweet history) — pure stdlib, zero new deps
@@ -38,6 +51,8 @@ The original XActions is great but depends on npm, which has been the target of 
 - **🤖 Auto `.env`**: CLI and MCP server load `.env` automatically
 - **📤 NDJSON export**: `--ndjson` alongside `--csv` and `--output`
 - **🧪 CI**: GitHub Actions (ruff + pytest on Python 3.10–3.13), 32 tests passing
+
+</details>
 
 <details>
 <summary>v1.2.0 changes</summary>
@@ -315,7 +330,7 @@ xactions-py/
 │       └── server.py       # MCP server (FastMCP)
 ├── cli/
 │   └── xactions.py         # CLI (Click)
-├── tests/                  # pytest + respx (32 tests)
+├── tests/                  # pytest + respx (40 tests)
 ├── .github/workflows/
 │   └── ci.yml              # ruff + pytest on 3.10–3.13
 ├── .env.example

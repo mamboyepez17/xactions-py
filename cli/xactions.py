@@ -9,15 +9,22 @@ v1.3.0:
   - Export NDJSON (--ndjson).
   - Comandos nuevos: analyze, track, history.
   - post soporta --media para adjuntar imágenes.
+
+v1.4.0:
+  - Decorador @with_client: elimina el boilerplate de client/finally en cada comando.
+  - Version leída de importlib.metadata (fuente única en pyproject.toml).
+  - search falla con error claro cuando la API bloquea la query (403) sin resultados.
 """
 
 from __future__ import annotations
 
 import asyncio
 import csv
+import functools
 import json
 import os
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 import click
@@ -28,8 +35,11 @@ load_dotenv()
 
 # Fix encoding para Windows (emojis, caracteres especiales)
 if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -73,6 +83,11 @@ PROXY_ENV = "TWITTER_PROXY"
 
 AnyClient = TwitterClient | ClientPool
 
+try:
+    __version__ = version("xactions-py")
+except PackageNotFoundError:
+    __version__ = "1.4.0"
+
 
 def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
     """
@@ -100,6 +115,29 @@ def get_client(cookies: str = "", cookies_file: str | None = None) -> AnyClient:
     if len(cookie_list) > 1:
         return ClientPool(cookie_list, proxy=proxy)
     return TwitterClient(cookies=cookie_list[0] if cookie_list else "", proxy=proxy)
+
+
+def with_client(func):
+    """
+    Decorador para comandos: extrae --cookies/--cookies-file de los kwargs,
+    crea el client (o pool), lo inyecta como primer argumento, maneja errores
+    y garantiza el cierre de conexiones.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        cookies = kwargs.pop("cookies", "")
+        cookies_file = kwargs.pop("cookies_file", None)
+        client = get_client(cookies, cookies_file)
+        try:
+            return func(client, *args, **kwargs)
+        except Exception as e:
+            click.echo(f"❌ {e}", err=True)
+            sys.exit(1)
+        finally:
+            run(client.aclose())
+
+    return wrapper
 
 
 def run(coro):
@@ -285,7 +323,7 @@ def common_options(fn):
 # ─── CLI principal ────────────────────────────────────────────────────────────
 
 @click.group()
-@click.version_option("1.3.0", prog_name="xactions-py")
+@click.version_option(__version__, prog_name="xactions-py")
 def cli():
     """⚡ XActions-PY — Twitter automation sin npm."""
     pass
@@ -294,109 +332,85 @@ def cli():
 @cli.command()
 @click.argument("username")
 @common_options
-def profile(username, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def profile(client, username, output, csv_path, ndjson_path, table):
     """Obtiene el perfil de un usuario."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(scrape_profile(client, username))
-        flat = [{
-            "id": data.get("id"),
-            "username": data.get("username"),
-            "name": data.get("name"),
-            "followers": data.get("followers"),
-            "following": data.get("following"),
-            "tweets_count": data.get("tweets_count"),
-            "verified": data.get("verified"),
-            "bio": (data.get("bio") or "").replace("\n", " "),
-            "created_at": data.get("created_at"),
-        }]
-        if csv_path or ndjson_path or output:
-            _handle_output(data, output, csv_path, ndjson_path, csv_data=flat)
-        else:
-            click.echo(f"\n{'─'*50}")
-            click.echo(f"  @{data.get('username')} — {data.get('name')}")
-            click.echo(f"  {'✓ Verificado' if data.get('verified') else 'No verificado'}")
-            click.echo(f"  Bio: {data.get('bio', '')[:100]}")
-            click.echo(f"  Followers: {data.get('followers', 0):,}")
-            click.echo(f"  Following: {data.get('following', 0):,}")
-            click.echo(f"  Tweets:    {data.get('tweets_count', 0):,}")
-            click.echo(f"  Ubicación: {data.get('location', 'N/A')}")
-            click.echo(f"  Creado:    {data.get('created_at', 'N/A')}")
-            click.echo(f"{'─'*50}\n")
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(scrape_profile(client, username))
+    flat = [{
+        "id": data.get("id"),
+        "username": data.get("username"),
+        "name": data.get("name"),
+        "followers": data.get("followers"),
+        "following": data.get("following"),
+        "tweets_count": data.get("tweets_count"),
+        "verified": data.get("verified"),
+        "bio": (data.get("bio") or "").replace("\n", " "),
+        "created_at": data.get("created_at"),
+    }]
+    if csv_path or ndjson_path or output:
+        _handle_output(data, output, csv_path, ndjson_path, csv_data=flat)
+    else:
+        click.echo(f"\n{'─'*50}")
+        click.echo(f"  @{data.get('username')} — {data.get('name')}")
+        click.echo(f"  {'✓ Verificado' if data.get('verified') else 'No verificado'}")
+        click.echo(f"  Bio: {data.get('bio', '')[:100]}")
+        click.echo(f"  Followers: {data.get('followers', 0):,}")
+        click.echo(f"  Following: {data.get('following', 0):,}")
+        click.echo(f"  Tweets:    {data.get('tweets_count', 0):,}")
+        click.echo(f"  Ubicación: {data.get('location', 'N/A')}")
+        click.echo(f"  Creado:    {data.get('created_at', 'N/A')}")
+        click.echo(f"{'─'*50}\n")
 
 
 @cli.command()
 @click.argument("username")
 @click.option("--limit", "-l", default=100, show_default=True, help="Máximo de usuarios")
 @common_options
-def followers(username, limit, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def followers(client, username, limit, output, csv_path, ndjson_path, table):
     """Lista los followers de un usuario."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(scrape_followers(client, username, limit=limit))
-        _handle_output(
-            {"count": len(data), "followers": data},
-            output, csv_path, ndjson_path,
-            csv_data=_flatten_users(data),
-            table_fn=print_users_table if table else None,
-            table_title=f"Followers de @{username}",
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(scrape_followers(client, username, limit=limit))
+    _handle_output(
+        {"count": len(data), "followers": data},
+        output, csv_path, ndjson_path,
+        csv_data=_flatten_users(data),
+        table_fn=print_users_table if table else None,
+        table_title=f"Followers de @{username}",
+    )
 
 
 @cli.command()
 @click.argument("username")
 @click.option("--limit", "-l", default=100, show_default=True, help="Máximo de usuarios")
 @common_options
-def following(username, limit, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def following(client, username, limit, output, csv_path, ndjson_path, table):
     """Lista los usuarios que sigue una cuenta."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(scrape_following(client, username, limit=limit))
-        _handle_output(
-            {"count": len(data), "following": data},
-            output, csv_path, ndjson_path,
-            csv_data=_flatten_users(data),
-            table_fn=print_users_table if table else None,
-            table_title=f"Following de @{username}",
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(scrape_following(client, username, limit=limit))
+    _handle_output(
+        {"count": len(data), "following": data},
+        output, csv_path, ndjson_path,
+        csv_data=_flatten_users(data),
+        table_fn=print_users_table if table else None,
+        table_title=f"Following de @{username}",
+    )
 
 
 @cli.command("non-followers")
 @click.argument("username")
 @click.option("--limit", "-l", default=200, show_default=True, help="Cuántos following revisar")
 @common_options
-def non_followers_cmd(username, limit, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def non_followers_cmd(client, username, limit, output, csv_path, ndjson_path, table):
     """Muestra quién no te sigue de vuelta."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(scrape_non_followers(client, username, limit=limit))
-        _handle_output(
-            {"count": len(data), "non_followers": data},
-            output, csv_path, ndjson_path,
-            csv_data=_flatten_users(data),
-            table_fn=print_users_table if table else None,
-            table_title=f"No te siguen de vuelta (@{username})",
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(scrape_non_followers(client, username, limit=limit))
+    _handle_output(
+        {"count": len(data), "non_followers": data},
+        output, csv_path, ndjson_path,
+        csv_data=_flatten_users(data),
+        table_fn=print_users_table if table else None,
+        table_title=f"No te siguen de vuelta (@{username})",
+    )
 
 
 @cli.command()
@@ -404,23 +418,17 @@ def non_followers_cmd(username, limit, cookies, cookies_file, output, csv_path, 
 @click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de tweets")
 @click.option("--replies", is_flag=True, help="Incluir respuestas")
 @common_options
-def tweets(username, limit, replies, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def tweets(client, username, limit, replies, output, csv_path, ndjson_path, table):
     """Obtiene los tweets recientes de un usuario."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(scrape_tweets(client, username, limit=limit, include_replies=replies))
-        _handle_output(
-            {"count": len(data), "tweets": data},
-            output, csv_path, ndjson_path,
-            csv_data=_flatten_tweets(data),
-            table_fn=print_tweets_table if table else None,
-            table_title=f"Tweets de @{username}",
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(scrape_tweets(client, username, limit=limit, include_replies=replies))
+    _handle_output(
+        {"count": len(data), "tweets": data},
+        output, csv_path, ndjson_path,
+        csv_data=_flatten_tweets(data),
+        table_fn=print_tweets_table if table else None,
+        table_title=f"Tweets de @{username}",
+    )
 
 
 @cli.command()
@@ -428,182 +436,134 @@ def tweets(username, limit, replies, cookies, cookies_file, output, csv_path, nd
 @click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de resultados")
 @click.option("--mode", default="Top", type=click.Choice(["Latest", "Top"]), show_default=True)
 @common_options
-def search(query, limit, mode, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def search(client, query, limit, mode, output, csv_path, ndjson_path, table):
     """Busca tweets por query."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(search_tweets(client, query, limit=limit, mode=mode))
-        _handle_output(
-            {"query": query, "count": len(data), "tweets": data},
-            output, csv_path, ndjson_path,
-            csv_data=_flatten_tweets(data),
-            table_fn=print_tweets_table if table else None,
-            table_title=f'Resultados: "{query}" ({mode})',
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(search_tweets(client, query, limit=limit, mode=mode))
+    _handle_output(
+        {"query": query, "count": len(data), "tweets": data},
+        output, csv_path, ndjson_path,
+        csv_data=_flatten_tweets(data),
+        table_fn=print_tweets_table if table else None,
+        table_title=f'Resultados: "{query}" ({mode})',
+    )
 
 
 @cli.command()
 @click.argument("tweet_id")
 @click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de replies")
 @common_options
-def replies(tweet_id, limit, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def replies(client, tweet_id, limit, output, csv_path, ndjson_path, table):
     """Obtiene replies/conversación de un tweet."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(get_tweet_replies(client, tweet_id, limit=limit))
-        _handle_output(
-            {"tweet_id": tweet_id, "count": len(data), "tweets": data},
-            output, csv_path, ndjson_path,
-            csv_data=_flatten_tweets(data),
-            table_fn=print_tweets_table if table else None,
-            table_title=f"Replies a {tweet_id}",
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(get_tweet_replies(client, tweet_id, limit=limit))
+    _handle_output(
+        {"tweet_id": tweet_id, "count": len(data), "tweets": data},
+        output, csv_path, ndjson_path,
+        csv_data=_flatten_tweets(data),
+        table_fn=print_tweets_table if table else None,
+        table_title=f"Replies a {tweet_id}",
+    )
 
 
 @cli.command()
 @click.argument("tweet_id")
 @click.option("--limit", "-l", default=100, show_default=True, help="Cantidad de usuarios")
 @common_options
-def likers(tweet_id, limit, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def likers(client, tweet_id, limit, output, csv_path, ndjson_path, table):
     """Usuarios que dieron like a un tweet."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(get_tweet_favoriters(client, tweet_id, limit=limit))
-        _handle_output(
-            {"tweet_id": tweet_id, "count": len(data), "users": data},
-            output, csv_path, ndjson_path,
-            csv_data=_flatten_users(data),
-            table_fn=print_users_table if table else None,
-            table_title=f"Likers de {tweet_id}",
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(get_tweet_favoriters(client, tweet_id, limit=limit))
+    _handle_output(
+        {"tweet_id": tweet_id, "count": len(data), "users": data},
+        output, csv_path, ndjson_path,
+        csv_data=_flatten_users(data),
+        table_fn=print_users_table if table else None,
+        table_title=f"Likers de {tweet_id}",
+    )
 
 
 @cli.command()
 @click.argument("tweet_id")
 @click.option("--limit", "-l", default=100, show_default=True, help="Cantidad de usuarios")
 @common_options
-def retweeters(tweet_id, limit, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def retweeters(client, tweet_id, limit, output, csv_path, ndjson_path, table):
     """Usuarios que hicieron retweet a un tweet."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(get_tweet_retweeters(client, tweet_id, limit=limit))
-        _handle_output(
-            {"tweet_id": tweet_id, "count": len(data), "users": data},
-            output, csv_path, ndjson_path,
-            csv_data=_flatten_users(data),
-            table_fn=print_users_table if table else None,
-            table_title=f"Retweeters de {tweet_id}",
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(get_tweet_retweeters(client, tweet_id, limit=limit))
+    _handle_output(
+        {"tweet_id": tweet_id, "count": len(data), "users": data},
+        output, csv_path, ndjson_path,
+        csv_data=_flatten_users(data),
+        table_fn=print_users_table if table else None,
+        table_title=f"Retweeters de {tweet_id}",
+    )
 
 
 @cli.command()
 @click.argument("username")
 @click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de tweets")
 @common_options
-def likes(username, limit, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def likes(client, username, limit, output, csv_path, ndjson_path, table):
     """Tweets a los que les dio like un usuario."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(get_user_likes(client, username, limit=limit))
-        _handle_output(
-            {"username": username, "count": len(data), "tweets": data},
-            output, csv_path, ndjson_path,
-            csv_data=_flatten_tweets(data),
-            table_fn=print_tweets_table if table else None,
-            table_title=f"Likes de @{username}",
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(get_user_likes(client, username, limit=limit))
+    _handle_output(
+        {"username": username, "count": len(data), "tweets": data},
+        output, csv_path, ndjson_path,
+        csv_data=_flatten_tweets(data),
+        table_fn=print_tweets_table if table else None,
+        table_title=f"Likes de @{username}",
+    )
 
 
 @cli.command()
 @click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de bookmarks")
 @common_options
-def bookmarks(limit, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def bookmarks(client, limit, output, csv_path, ndjson_path, table):
     """Bookmarks del usuario autenticado."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(get_bookmarks(client, limit=limit))
-        _handle_output(
-            {"count": len(data), "bookmarks": data},
-            output, csv_path, ndjson_path,
-            csv_data=_flatten_tweets(data),
-            table_fn=print_tweets_table if table else None,
-            table_title="Bookmarks",
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(get_bookmarks(client, limit=limit))
+    _handle_output(
+        {"count": len(data), "bookmarks": data},
+        output, csv_path, ndjson_path,
+        csv_data=_flatten_tweets(data),
+        table_fn=print_tweets_table if table else None,
+        table_title="Bookmarks",
+    )
 
 
 @cli.command()
 @click.option("--woeid", default=1, show_default=True, help="Yahoo Where On Earth ID (1=worldwide)")
 @common_options
-def trends(woeid, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def trends(client, woeid, output, csv_path, ndjson_path, table):
     """Trending topics de Twitter/X."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(get_trends(client, woeid=woeid))
-        _handle_output(
-            {"count": len(data), "trends": data},
-            output, csv_path, ndjson_path,
-            csv_data=data,
-            table_fn=print_trends_table if table else None,
-            table_title="Trending topics",
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(get_trends(client, woeid=woeid))
+    _handle_output(
+        {"count": len(data), "trends": data},
+        output, csv_path, ndjson_path,
+        csv_data=data,
+        table_fn=print_trends_table if table else None,
+        table_title="Trending topics",
+    )
 
 
 @cli.command()
 @click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de tweets")
 @click.option("--latest", is_flag=True, help="Usar HomeLatestTimeline en vez de HomeTimeline")
 @common_options
-def home(limit, latest, cookies, cookies_file, output, csv_path, ndjson_path, table):
+@with_client
+def home(client, limit, latest, output, csv_path, ndjson_path, table):
     """Home timeline del usuario autenticado."""
-    client = get_client(cookies, cookies_file)
-    try:
-        data = run(get_home_timeline(client, limit=limit, latest=latest))
-        _handle_output(
-            {"count": len(data), "tweets": data},
-            output, csv_path, ndjson_path,
-            csv_data=_flatten_tweets(data),
-            table_fn=print_tweets_table if table else None,
-            table_title="Home timeline",
-        )
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    data = run(get_home_timeline(client, limit=limit, latest=latest))
+    _handle_output(
+        {"count": len(data), "tweets": data},
+        output, csv_path, ndjson_path,
+        csv_data=_flatten_tweets(data),
+        table_fn=print_tweets_table if table else None,
+        table_title="Home timeline",
+    )
 
 
 # ─── Analytics & tracking ─────────────────────────────────────────────────────
@@ -614,29 +574,24 @@ def home(limit, latest, cookies, cookies_file, output, csv_path, ndjson_path, ta
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
 @click.option("--output", "-o", default=None, help="Archivo JSON de salida")
-def analyze(username, limit, cookies, cookies_file, output):
+@with_client
+def analyze(client, username, limit, output):
     """Analiza el engagement de un usuario (promedios, top tweets, mejores horas)."""
-    client = get_client(cookies, cookies_file)
-    try:
-        async def _analyze():
-            profile = await scrape_profile(client, username)
-            tw = await scrape_tweets(client, username, limit=limit)
-            return profile, tw
 
-        profile, tw = run(_analyze())
-        report = analyze_tweets(tw, profile=profile)
-        report["username"] = username
-        report["followers"] = profile.get("followers")
+    async def _analyze():
+        prof = await scrape_profile(client, username)
+        tw = await scrape_tweets(client, username, limit=limit)
+        return prof, tw
 
-        if output:
-            print_json(report, output)
-        else:
-            print_analysis(report, username)
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    prof, tw = run(_analyze())
+    report = analyze_tweets(tw, profile=prof)
+    report["username"] = username
+    report["followers"] = prof.get("followers")
+
+    if output:
+        print_json(report, output)
+    else:
+        print_analysis(report, username)
 
 
 @cli.command()
@@ -645,39 +600,33 @@ def analyze(username, limit, cookies, cookies_file, output):
 @click.option("--db", "db_path", default=None, help="Path de la base SQLite (default ~/.xactions/xactions.db)")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-def track(username, limit, db_path, cookies, cookies_file):
+@with_client
+def track(client, username, limit, db_path):
     """Guarda un snapshot de métricas de un usuario en SQLite y muestra el delta."""
-    client = get_client(cookies, cookies_file)
-    try:
-        db = TrackerDB(db_path)
+    db = TrackerDB(db_path)
 
-        async def _collect():
-            profile = await scrape_profile(client, username)
-            tw = await scrape_tweets(client, username, limit=limit)
-            return profile, tw
+    async def _collect():
+        prof = await scrape_profile(client, username)
+        tw = await scrape_tweets(client, username, limit=limit)
+        return prof, tw
 
-        profile, tw = run(_collect())
+    prof, tw = run(_collect())
 
-        previous = db.get_last_profile_snapshot(username)
-        delta = compute_profile_delta(previous, profile)
+    previous = db.get_last_profile_snapshot(username)
+    delta = compute_profile_delta(previous, prof)
 
-        db.save_profile_snapshot(username, profile)
-        saved = db.save_tweet_snapshots(tw)
+    db.save_profile_snapshot(username, prof)
+    saved = db.save_tweet_snapshots(tw)
 
-        click.echo(f"\n📸 Snapshot guardado para @{username} ({saved} tweets)")
-        click.echo(f"  Followers: {profile.get('followers', 0):,}")
-        if delta["followers_delta"] is not None:
-            sign = "+" if delta["followers_delta"] >= 0 else ""
-            click.echo(f"  Δ followers: {sign}{delta['followers_delta']:,} (desde {delta.get('since')})")
-            click.echo(f"  Δ tweets:    {'+' if delta['tweets_delta'] >= 0 else ''}{delta['tweets_delta']:,}")
-        else:
-            click.echo("  (primer snapshot — corre el comando de nuevo para ver deltas)")
-        click.echo(f"  DB: {db.path}\n")
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    click.echo(f"\n📸 Snapshot guardado para @{username} ({saved} tweets)")
+    click.echo(f"  Followers: {prof.get('followers', 0):,}")
+    if delta["followers_delta"] is not None:
+        sign = "+" if delta["followers_delta"] >= 0 else ""
+        click.echo(f"  Δ followers: {sign}{delta['followers_delta']:,} (desde {delta.get('since')})")
+        click.echo(f"  Δ tweets:    {'+' if delta['tweets_delta'] >= 0 else ''}{delta['tweets_delta']:,}")
+    else:
+        click.echo("  (primer snapshot — corre el comando de nuevo para ver deltas)")
+    click.echo(f"  DB: {db.path}\n")
 
 
 @cli.command()
@@ -723,150 +672,103 @@ def history(username, limit, db_path, output):
               help="Imagen a adjuntar (se puede repetir, máx 4)")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-def post(text, reply_to, media_files, cookies, cookies_file):
+@with_client
+def post(client, text, reply_to, media_files):
     """Publica un tweet. Requiere auth_token."""
-    client = get_client(cookies, cookies_file)
-    try:
-        async def _post():
-            media_ids = []
-            for path in media_files[:4]:
-                up = await upload_media(client, path)
-                media_ids.append(up["media_id"])
-                click.echo(f"📎 Media subida: {path} (id {up['media_id']})")
-            return await post_tweet(client, text, reply_to_id=reply_to, media_ids=media_ids)
 
-        result = run(_post())
-        if result["success"]:
-            click.echo(f"✅ Tweet publicado! ID: {result['tweet_id']}")
-        else:
-            click.echo("❌ No se pudo publicar.", err=True)
-            sys.exit(1)
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
+    async def _post():
+        media_ids = []
+        for path in media_files[:4]:
+            up = await upload_media(client, path)
+            media_ids.append(up["media_id"])
+            click.echo(f"📎 Media subida: {path} (id {up['media_id']})")
+        return await post_tweet(client, text, reply_to_id=reply_to, media_ids=media_ids)
+
+    result = run(_post())
+    if result["success"]:
+        click.echo(f"✅ Tweet publicado! ID: {result['tweet_id']}")
+    else:
+        click.echo("❌ No se pudo publicar.", err=True)
         sys.exit(1)
-    finally:
-        run(client.aclose())
 
 
 @cli.command()
 @click.argument("tweet_id")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-def delete(tweet_id, cookies, cookies_file):
+@with_client
+def delete(client, tweet_id):
     """Elimina un tweet por ID. Requiere auth_token."""
-    client = get_client(cookies, cookies_file)
-    try:
-        result = run(delete_tweet(client, tweet_id))
-        click.echo("✅ Tweet eliminado." if result["success"] else "❌ No se pudo eliminar.")
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    result = run(delete_tweet(client, tweet_id))
+    click.echo("✅ Tweet eliminado." if result["success"] else "❌ No se pudo eliminar.")
 
 
 @cli.command()
 @click.argument("tweet_id")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-def like(tweet_id, cookies, cookies_file):
+@with_client
+def like(client, tweet_id):
     """Da like a un tweet. Requiere auth_token."""
-    client = get_client(cookies, cookies_file)
-    try:
-        result = run(like_tweet(client, tweet_id))
-        click.echo("✅ Like dado." if result["success"] else "❌ Error dando like.")
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    result = run(like_tweet(client, tweet_id))
+    click.echo("✅ Like dado." if result["success"] else "❌ Error dando like.")
 
 
 @cli.command()
 @click.argument("tweet_id")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-def unlike(tweet_id, cookies, cookies_file):
+@with_client
+def unlike(client, tweet_id):
     """Quita el like de un tweet. Requiere auth_token."""
-    client = get_client(cookies, cookies_file)
-    try:
-        result = run(unlike_tweet(client, tweet_id))
-        click.echo("✅ Like quitado." if result["success"] else "❌ Error quitando like.")
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    result = run(unlike_tweet(client, tweet_id))
+    click.echo("✅ Like quitado." if result["success"] else "❌ Error quitando like.")
 
 
 @cli.command()
 @click.argument("tweet_id")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-def bookmark(tweet_id, cookies, cookies_file):
+@with_client
+def bookmark(client, tweet_id):
     """Agrega un tweet a bookmarks. Requiere auth_token."""
-    client = get_client(cookies, cookies_file)
-    try:
-        result = run(create_bookmark(client, tweet_id))
-        click.echo("✅ Bookmark agregado." if result["success"] else "❌ Error agregando bookmark.")
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    result = run(create_bookmark(client, tweet_id))
+    click.echo("✅ Bookmark agregado." if result["success"] else "❌ Error agregando bookmark.")
 
 
 @cli.command()
 @click.argument("tweet_id")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-def unbookmark(tweet_id, cookies, cookies_file):
+@with_client
+def unbookmark(client, tweet_id):
     """Elimina un tweet de bookmarks. Requiere auth_token."""
-    client = get_client(cookies, cookies_file)
-    try:
-        result = run(delete_bookmark(client, tweet_id))
-        click.echo("✅ Bookmark eliminado." if result["success"] else "❌ Error eliminando bookmark.")
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    result = run(delete_bookmark(client, tweet_id))
+    click.echo("✅ Bookmark eliminado." if result["success"] else "❌ Error eliminando bookmark.")
 
 
 @cli.command()
 @click.argument("username")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-def follow(username, cookies, cookies_file):
+@with_client
+def follow(client, username):
     """Sigue a un usuario. Requiere auth_token."""
-    client = get_client(cookies, cookies_file)
-    try:
-        user_id = run(get_user_id(client, username))
-        result = run(follow_user(client, user_id))
-        click.echo(f"✅ Siguiendo a @{username}." if result["success"] else f"❌ Error siguiendo a @{username}.")
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    user_id = run(get_user_id(client, username))
+    result = run(follow_user(client, user_id))
+    click.echo(f"✅ Siguiendo a @{username}." if result["success"] else f"❌ Error siguiendo a @{username}.")
 
 
 @cli.command()
 @click.argument("username")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-def unfollow(username, cookies, cookies_file):
+@with_client
+def unfollow(client, username):
     """Deja de seguir a un usuario. Requiere auth_token."""
-    client = get_client(cookies, cookies_file)
-    try:
-        user_id = run(get_user_id(client, username))
-        result = run(unfollow_user(client, user_id))
-        click.echo(f"✅ Unfollow de @{username}." if result["success"] else f"❌ Error en unfollow de @{username}.")
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
+    user_id = run(get_user_id(client, username))
+    result = run(unfollow_user(client, user_id))
+    click.echo(f"✅ Unfollow de @{username}." if result["success"] else f"❌ Error en unfollow de @{username}.")
 
 
 @cli.command("bulk-unfollow")
@@ -876,12 +778,12 @@ def unfollow(username, cookies, cookies_file):
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
 @click.option("--dry-run", is_flag=True, help="Solo muestra quién sería unfollowed, sin hacer nada")
-def bulk_unfollow_cmd(username, limit, delay, cookies, cookies_file, dry_run):
+@with_client
+def bulk_unfollow_cmd(client, username, limit, delay, dry_run):
     """
     Unfollow masivo de cuentas que no te siguen de vuelta.
     ⚠️  Usa --dry-run primero para ver qué pasaría.
     """
-    client = get_client(cookies, cookies_file)
     try:
         non_followers = run(scrape_non_followers(client, username, limit=limit))
 
@@ -914,41 +816,30 @@ def bulk_unfollow_cmd(username, limit, delay, cookies, cookies_file, dry_run):
 
     except click.Abort:
         click.echo("\nCancelado.")
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
-        sys.exit(1)
-    finally:
-        run(client.aclose())
 
 
 @cli.command()
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-def validate(cookies, cookies_file):
+@with_client
+def validate(client):
     """Valida que las cookies funcionan contra la API (todas las del pool)."""
-    client = get_client(cookies, cookies_file)
-    try:
-        result = run(client.validate_cookies())
-        if "accounts" in result:
-            # Pool multi-cuenta
-            click.echo(f"\n🔐 Pool: {result['alive']}/{result['total']} cuentas vivas")
-            for acc in result["accounts"]:
-                if acc.get("valid"):
-                    click.echo(f"  ✅ cuenta #{acc['account']}: @{acc.get('username')}")
-                else:
-                    click.echo(f"  ❌ cuenta #{acc['account']}: {acc.get('error')}")
-            if result["alive"] == 0:
-                sys.exit(1)
-        elif result.get("valid"):
-            click.echo(f"✅ Cookies válidas. @{result.get('username')} ({result.get('user_id')})")
-        else:
-            click.echo(f"❌ Cookies inválidas: {result.get('error')}", err=True)
+    result = run(client.validate_cookies())
+    if "accounts" in result:
+        # Pool multi-cuenta
+        click.echo(f"\n🔐 Pool: {result['alive']}/{result['total']} cuentas vivas")
+        for acc in result["accounts"]:
+            if acc.get("valid"):
+                click.echo(f"  ✅ cuenta #{acc['account']}: @{acc.get('username')}")
+            else:
+                click.echo(f"  ❌ cuenta #{acc['account']}: {acc.get('error')}")
+        if result["alive"] == 0:
             sys.exit(1)
-    except Exception as e:
-        click.echo(f"❌ {e}", err=True)
+    elif result.get("valid"):
+        click.echo(f"✅ Cookies válidas. @{result.get('username')} ({result.get('user_id')})")
+    else:
+        click.echo(f"❌ Cookies inválidas: {result.get('error')}", err=True)
         sys.exit(1)
-    finally:
-        run(client.aclose())
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

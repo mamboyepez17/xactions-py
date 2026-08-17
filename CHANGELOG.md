@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.4.0 — 2026-08-17
+
+### Fixed
+- `TwitterClient.close()`: la lógica de cierre síncrono estaba invertida y fallaba dentro de un loop corriendo; ahora programa el cierre sin bloquear.
+- Mutations (like, tweet, unfollow, bookmark...) ya no se reintentan ante errores de red — un timeout tras ser procesada por el servidor podía duplicar la acción.
+- CSRF token (`ct0`) se refresca automáticamente cuando Twitter lo rota vía `Set-Cookie` en la respuesta.
+- `search_tweets`: ante un bloqueo 403 sin resultados ahora propaga `ForbiddenError` (antes devolvía una lista vacía silenciosa); con resultados parciales los devuelve con warning.
+- `bulk_unfollow`: loggea cada fallo individual en vez de tragárselo silenciosamente.
+- MCP server: al cambiar las cookies se cierra (`aclose`) el cliente anterior — antes quedaban sockets abiertos hasta el GC.
+- `scrape_profile`: usuarios suspendidos/no disponibles ahora lanzan `NotFoundError` claro en vez de romper el CLI con `AttributeError`.
+
+### Added
+- Headers `x-client-uuid` y `x-client-transaction-id` en todas las peticiones (compatibilidad con la GraphQL actual, igual que twikit).
+- MCP `x_bulk_unfollow_non_followers`: parámetro `dry_run` para previsualizar sin ejecutar.
+- SQLite: `PRAGMA journal_mode=WAL` + `busy_timeout` para uso concurrente seguro.
+- CLI refactorizado con decorador `@with_client` (~100 líneas menos de boilerplate); la versión se lee de `importlib.metadata` (fuente única: `pyproject.toml`).
+- CI: matriz con `windows-latest` además de `ubuntu-latest`.
+- Tests: 40 passing (mutation no-retry, ct0 refresh, `close()` en loop, búsqueda bloqueada, CLI con `CliRunner`).
+
 ## v1.3.0 — 2026-07-27
 
 ### Added

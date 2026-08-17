@@ -1,9 +1,10 @@
 """Tests para parsers y scrapers de xactions-py."""
 
 import httpx
+import pytest
 import respx
 
-from src.scraper.client import TwitterClient
+from src.scraper.client import ForbiddenError, TwitterClient
 from src.scraper.scrapers import (
     _parse_tweet_list,
     _parse_user_list,
@@ -11,6 +12,7 @@ from src.scraper.scrapers import (
     get_user_id,
     parse_tweet,
     parse_user,
+    search_tweets,
 )
 
 
@@ -185,3 +187,14 @@ async def test_get_user_id_uses_cache():
 
     assert uid1 == uid2 == "44196397"
     assert route.call_count == 1  # el segundo lookup salió del cache
+
+
+@respx.mock
+async def test_search_raises_forbidden_when_no_results():
+    respx.post("https://x.com/i/api/graphql/flaR-PUMshxFWZWPNpq4zA/SearchTimeline").mock(
+        return_value=httpx.Response(403, json={"error": "Forbidden"})
+    )
+
+    async with TwitterClient(cookies="auth_token=a; ct0=b") as client:
+        with pytest.raises(ForbiddenError):
+            await search_tweets(client, "query bloqueada", limit=10)

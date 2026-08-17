@@ -13,6 +13,7 @@ v1.2.0:
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from .client import (
@@ -22,6 +23,8 @@ from .client import (
     TwitterClient,
     TwitterError,
 )
+
+_log = logging.getLogger(__name__)
 
 # ─── Cache de user_id (evita lookups repetidos de perfil) ─────────────────────
 
@@ -269,7 +272,10 @@ async def scrape_profile(client: TwitterClient, username: str) -> dict[str, Any]
     )
     if not raw:
         raise NotFoundError(f"Usuario @{username} no encontrado")
-    return parse_user(raw)
+    profile = parse_user(raw)
+    if not profile:
+        raise NotFoundError(f"Usuario @{username} no disponible (cuenta suspendida o bloqueada)")
+    return profile
 
 
 # ─── Scrapers de relaciones ───────────────────────────────────────────────────
@@ -713,9 +719,14 @@ async def search_tweets(
 
         try:
             data = await client.graphql("SearchTimeline", variables=variables)
-        except ForbiddenError:
-            # Twitter/X a veces bloquea ciertas queries; devolvemos lo recolectado.
-            break
+        except ForbiddenError as e:
+            # Twitter/X a veces bloquea ciertas queries. Si ya teníamos
+            # resultados, los devolvemos (con warning); si no, propagamos
+            # el error para que el usuario sepa que fue un bloqueo.
+            if all_tweets:
+                _log.warning("Búsqueda bloqueada (403) tras %d tweets: %s", len(all_tweets), e)
+                break
+            raise
 
         timeline = (
             data.get("data", {})

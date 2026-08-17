@@ -1,5 +1,7 @@
 """Tests para el cliente HTTP de xactions-py."""
 
+import asyncio
+
 import httpx
 import pytest
 import respx
@@ -10,6 +12,7 @@ from src.scraper.client import (
     ForbiddenError,
     RateLimitError,
     TwitterClient,
+    TwitterError,
 )
 
 
@@ -130,3 +133,58 @@ async def test_parse_cookies_url_encoding():
     client = TwitterClient(cookies="auth_token=abc%3D123; ct0=xyz%2B")
     assert client._cookies["auth_token"] == "abc=123"
     assert client._cookies["ct0"] == "xyz+"
+
+
+@respx.mock
+async def test_mutation_not_retried_on_network_error():
+    client = TwitterClient(cookies="auth_token=abc; ct0=xyz", max_retries=2)
+    route = respx.post("https://x.com/i/api/graphql/123/FavoriteTweet").mock(
+        side_effect=httpx.ConnectError("Connection failed")
+    )
+
+    from src.scraper.client import GRAPHQL_ENDPOINTS
+    old = GRAPHQL_ENDPOINTS["FavoriteTweet"].copy()
+    GRAPHQL_ENDPOINTS["FavoriteTweet"]["queryId"] = "123"
+    try:
+        with pytest.raises(TwitterError):
+            await client.graphql("FavoriteTweet", variables={"tweet_id": "1"}, mutation=True)
+    finally:
+        GRAPHQL_ENDPOINTS["FavoriteTweet"].update(old)
+
+    # Las mutations no se reintentan para evitar acciones duplicadas.
+    assert route.call_count == 1
+
+
+@respx.mock
+async def test_csrf_token_updated_from_response(client):
+    respx.get("https://x.com/i/api/graphql/123/UserByScreenName").mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": {}},
+            headers={"Set-Cookie": "ct0=newtoken; Path=/; Domain=.x.com"},
+        )
+    )
+
+    from src.scraper.client import GRAPHQL_ENDPOINTS
+    old = GRAPHQL_ENDPOINTS["UserByScreenName"].copy()
+    GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = "123"
+    try:
+        await client.graphql("UserByScreenName", variables={"screen_name": "test"})
+    finally:
+        GRAPHQL_ENDPOINTS["UserByScreenName"].update(old)
+
+    assert client._csrf_token == "newtoken"
+    assert "ct0=newtoken" in client._cookie_str
+
+
+async def test_close_inside_running_loop_does_not_crash():
+    client = TwitterClient(cookies="auth_token=a; ct0=b")
+    client.close()  # antes esto lanzaba RuntimeError desde un loop corriendo
+    await asyncio.sleep(0.01)  # deja correr la tarea de cierre programada
+    assert client._closed is True
+
+
+def test_close_sync_without_loop():
+    client = TwitterClient(cookies="auth_token=a; ct0=b")
+    client.close()
+    assert client._closed is True

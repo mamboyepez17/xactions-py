@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xactions-py"
-version = "1.3.0"
+version = "1.4.0"
 description = "X/Twitter automation toolkit en Python puro. Sin npm. Sin Puppeteer."
 readme = "README.md"
 requires-python = ">=3.10"
