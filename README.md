@@ -29,27 +29,27 @@ The original XActions is great but depends on npm, which has been the target of 
 
 ## What's new in v1.5.0
 
-- **📦 Paquete instalable real**: código en `src/xactions/`, imports `from xactions import ...`, sin `sys.path`
-- **🔑 API pública unificada**: `TwitterClient`, scrapers, actions y wrappers sync desde un solo import
-- **🔄 GraphQL auto-refresh**: si un queryId se rompe, el cliente reintenta tras refrescar IDs (bundle logueado → anónimo → twikit) — `xactions gql-status` / `xactions gql-refresh`
-- **📜 LICENSE MIT** y marcador `py.typed` (soporte de tipos estáticos)
-- **🖥️ CLI/MCP**: `xactions ...` y `python -m xactions.mcp_server` (ya no `python cli/xactions.py`)
-- **🤖 MCP 2.x**: compatible con `mcp>=2` (`MCPServer`) y `mcp` 1.x (`FastMCP`)
+- **📦 Real installable package**: code in `src/xactions/`, import `from xactions import ...`, no `sys.path` hacks
+- **🔑 Unified public API**: `TwitterClient`, scrapers, actions, and sync wrappers from a single import
+- **🔄 GraphQL auto-refresh**: if a queryId breaks, the client refreshes IDs and retries (logged-in bundle → anonymous → twikit) — `xactions gql-status` / `xactions gql-refresh`
+- **📜 MIT LICENSE** + `py.typed` (static typing support)
+- **🖥️ CLI/MCP**: `xactions ...` and `python -m xactions.mcp_server` (no more `python cli/xactions.py`)
+- **🤖 MCP 2.x**: works with `mcp>=2` (`MCPServer`) and `mcp` 1.x (`FastMCP`)
 
-> **Migración desde ≤1.4.x:** `from src.scraper...` / `from src.actions...` / `from cli.xactions import cli` → `from xactions...` / `from xactions.cli import cli`. El comando instalado sigue siendo `xactions`.
+> **Migrating from ≤1.4.x:** `from src.scraper...` / `from src.actions...` / `from cli.xactions import cli` → `from xactions...` / `from xactions.cli import cli`. The installed CLI command is still `xactions`.
 
 <details>
 <summary>v1.4.0 changes</summary>
 
-- **🛡️ Seguridad anti-duplicados**: las mutations ya no se reintentan ante errores de red (un timeout no puede duplicar un like/tweet)
-- **🔑 CSRF auto-refresh**: `ct0` se actualiza solo cuando X lo rota en sesiones largas
-- **🖥️ Headers modernos**: `x-client-uuid` + `x-client-transaction-id` en todas las peticiones
-- **🚨 Errores claros**: búsqueda bloqueada (403) falla con mensaje explícito; cuentas suspendidas devuelven `NotFoundError` descriptivo
-- **🧹 CLI refactorizado**: decorador `@with_client` (-~100 líneas de boilerplate), versión desde `importlib.metadata`
-- **🗄️ SQLite concurrente**: WAL + `busy_timeout` para trackear desde varios procesos
-- **🔍 MCP `dry_run`**: `x_bulk_unfollow_non_followers` permite previsualizar sin ejecutar
-- **🪟 CI en Windows**: matriz con `windows-latest` además de Linux
-- **🧪 40 tests** (8 nuevos: mutation no-retry, ct0 refresh, `close()` en loop, CLI)
+- **🛡️ Anti-duplicate mutations**: mutations are no longer retried on network errors (a timeout cannot double a like/tweet)
+- **🔑 CSRF auto-refresh**: `ct0` updates when X rotates it in long sessions
+- **🖥️ Modern headers**: `x-client-uuid` + `x-client-transaction-id` on all requests
+- **🚨 Clear errors**: blocked search (403) fails with an explicit message; suspended accounts raise a descriptive `NotFoundError`
+- **🧹 CLI refactor**: `@with_client` decorator (~100 lines less boilerplate), version from `importlib.metadata`
+- **🗄️ Concurrent SQLite**: WAL + `busy_timeout` for multi-process tracking
+- **🔍 MCP `dry_run`**: `x_bulk_unfollow_non_followers` can preview without executing
+- **🪟 Windows CI**: matrix with `windows-latest` in addition to Linux
+- **🧪 40 tests** (8 new: mutation no-retry, ct0 refresh, `close()` in loop, CLI)
 
 </details>
 
@@ -131,7 +131,7 @@ them automatically when one hits a rate limit or dies:
 auth_token=ACCOUNT1_TOKEN; ct0=ACCOUNT1_CT0
 auth_token=ACCOUNT2_TOKEN; ct0=ACCOUNT2_CT0
 
-chmod 600 cookies.txt   # Unix: restringe permisos
+chmod 600 cookies.txt   # Unix: restrict permissions
 
 xactions search "crypto" --cookies-file cookies.txt --limit 200
 xactions validate --cookies-file cookies.txt   # checks every account
@@ -184,7 +184,7 @@ asyncio.run(main())
 ### CLI
 
 ```bash
-# Tras pip install -e . el comando es `xactions` (o python -m xactions.cli)
+# After pip install -e . the command is `xactions` (or python -m xactions.cli)
 xactions profile elonmusk
 xactions profile elonmusk --csv profile.csv
 
@@ -204,9 +204,9 @@ xactions tweets elonmusk --limit 50 --table
 xactions search "artificial intelligence" --mode Top
 xactions search "crypto" --from elonmusk --min-faves 100 --lang es --exclude-retweets
 
-# Thread (hilo)
-xactions thread "Parte 1 del hilo" "Parte 2" "Cierre"
-xactions thread --from-file hilo.txt --delay 2
+# Thread
+xactions thread "Part 1 of the thread" "Part 2" "Closing"
+xactions thread --from-file thread.txt --delay 2
 
 # Compare accounts
 xactions compare userA userB --limit 50
@@ -343,22 +343,24 @@ TWITTER_COOKIES="auth_token=xxx; ct0=yyy" python -m xactions.mcp_server
 ```
 xactions-py/
 ├── src/
-│   └── xactions/           # paquete instalable
-│       ├── __init__.py     # API pública (TwitterClient, scrapers, actions…)
+│   └── xactions/           # installable package
+│       ├── __init__.py     # public API (TwitterClient, scrapers, actions…)
 │       ├── client.py       # TwitterClient — async HTTP with httpx
 │       ├── pool.py         # ClientPool — multi-account rotation
 │       ├── scrapers.py     # profile, followers, tweets, search… + sync wrappers
 │       ├── actions.py      # like, follow, tweet, bookmark, media, bulk_unfollow
 │       ├── analyzer.py     # engagement analytics (pure stdlib)
 │       ├── db.py           # SQLite metric tracking
-│       ├── gql_refresh.py  # auto-refresh de GraphQL query IDs
+│       ├── gql_refresh.py  # GraphQL query ID auto-refresh
+│       ├── search_query.py # advanced search operators
+│       ├── security.py     # cookie redaction / CLI warnings
 │       ├── cli.py          # CLI (Click) → entry point `xactions`
 │       ├── mcp_server.py   # MCP server (mcp 2.x MCPServer / 1.x FastMCP)
 │       └── py.typed
 ├── tests/                  # pytest + respx (78 tests)
 ├── .github/workflows/
 │   └── ci.yml              # ruff + pytest on 3.10–3.13
-├── Implementation_Plan/    # plan de trabajo v1.5.0
+├── Implementation_Plan/    # v1.5.0 work plan
 ├── .env.example
 ├── .gitignore
 ├── LICENSE
@@ -397,7 +399,7 @@ Twitter's internal query IDs change when they deploy new JS bundles. v1.5.0 miti
 1. **Auto-refresh** — on a stale query (HTTP 404 / “Query does not exist”), the client refreshes IDs once and retries.
 2. **Manual** — `xactions gql-refresh` (or `gql-status` to inspect the cache).
 3. Cache lives at `~/.xactions/gql_endpoints.json`.
-4. Discovery multi-fuente: bundle logueado de X (si hay cookies) → bundle anónimo → [twikit `gql.py`](https://github.com/d60/twikit/blob/main/twikit/client/gql.py) como fallback.
+4. Multi-source discovery: X logged-in bundle (if cookies) → anonymous bundle → [twikit `gql.py`](https://github.com/d60/twikit/blob/main/twikit/client/gql.py) as fallback.
 
 If an endpoint still fails after refresh, check twikit or update `src/xactions/client.py` defaults.
 
