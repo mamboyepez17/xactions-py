@@ -95,12 +95,24 @@ except PackageNotFoundError:
     __version__ = "1.5.0"
 
 
-def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
+def _load_cookies_list(cookies: str, cookies_file: str | None, from_browser: str | None = None) -> list[str]:
     """
     Devuelve la lista de strings de cookies disponibles.
-    - --cookies-file: una cookie por línea (líneas vacías y # ignoradas).
-    - --cookies / TWITTER_COOKIES: una sola cookie, o varias separadas por '|||'.
+    - --from-browser: lee auth_token/ct0 del navegador instalado
+    - --cookies-file: soporta cookie-string, Netscape, Cookie-Editor JSON, Playwright
+    - --cookies / TWITTER_COOKIES: una sola cookie, o varias separadas por '|||'
     """
+    from .browser_cookies import import_from_browser, load_cookies_from_file
+
+    if from_browser:
+        imported = import_from_browser(from_browser)
+        if not imported:
+            raise click.ClickException(
+                f"No se pudieron importar cookies desde {from_browser}. "
+                "Exporta con Cookie-Editor y usa --cookies-file."
+            )
+        return [imported]
+
     raw: list[str] = []
     if cookies_file:
         if not os.path.exists(cookies_file):
@@ -108,8 +120,11 @@ def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
         perm_warn = check_cookies_file_permissions(cookies_file)
         if perm_warn:
             click.echo(f"⚠️  {perm_warn}", err=True)
-        with open(cookies_file, encoding="utf-8") as f:
-            raw = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+        raw = load_cookies_from_file(cookies_file)
+        if not raw:
+            # fallback simple lines
+            with open(cookies_file, encoding="utf-8") as f:
+                raw = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
     else:
         value = cookies or os.getenv(COOKIES_ENV, "")
         if value:
@@ -117,9 +132,13 @@ def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
     return raw
 
 
-def get_client(cookies: str = "", cookies_file: str | None = None) -> AnyClient:
+def get_client(
+    cookies: str = "",
+    cookies_file: str | None = None,
+    from_browser: str | None = None,
+) -> AnyClient:
     """Devuelve un TwitterClient (1 cookie) o un ClientPool (varias)."""
-    cookie_list = _load_cookies_list(cookies, cookies_file)
+    cookie_list = _load_cookies_list(cookies, cookies_file, from_browser=from_browser)
     cli_warn = warn_cli_cookies(cookies)
     if cli_warn:
         click.echo(f"⚠️  {cli_warn}", err=True)
@@ -145,7 +164,8 @@ def with_client(func):
     def wrapper(*args, **kwargs):
         cookies = kwargs.pop("cookies", "")
         cookies_file = kwargs.pop("cookies_file", None)
-        client = get_client(cookies, cookies_file)
+        from_browser = kwargs.pop("from_browser", None)
+        client = get_client(cookies, cookies_file, from_browser=from_browser)
         exit_code = 0
         try:
             return func(client, *args, **kwargs)
@@ -343,7 +363,13 @@ def common_options(fn):
         help="Cookies de sesión (preferir .env TWITTER_COOKIES o --cookies-file)",
     )(fn)
     fn = click.option("--cookies-file", type=click.Path(exists=True), default=None,
-                      help="Archivo con cookies (una por línea = pool multi-cuenta)")(fn)
+                      help="Cookie file (line format, Netscape, Cookie-Editor JSON)")(fn)
+    fn = click.option(
+        "--from-browser",
+        type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]),
+        default=None,
+        help="Import auth_token/ct0 from an installed browser profile",
+    )(fn)
     fn = click.option("--output", "-o", default=None, help="Archivo JSON de salida")(fn)
     fn = click.option("--csv", "csv_path", default=None, help="Archivo CSV de salida")(fn)
     fn = click.option("--ndjson", "ndjson_path", default=None, help="Archivo NDJSON de salida")(fn)
