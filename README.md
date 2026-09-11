@@ -7,7 +7,7 @@ No npm. No Puppeteer. Just `httpx` + Twitter/X internal GraphQL API.
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/deps-3-brightgreen?style=flat-square)
 ![npm free](https://img.shields.io/badge/npm-free-red?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-40%20passing-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-78%20passing-brightgreen?style=flat-square)
 ![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?style=flat-square)
 
 ---
@@ -27,7 +27,19 @@ The original XActions is great but depends on npm, which has been the target of 
 
 ---
 
-## What's new in v1.4.0
+## What's new in v1.5.0
+
+- **📦 Paquete instalable real**: código en `src/xactions/`, imports `from xactions import ...`, sin `sys.path`
+- **🔑 API pública unificada**: `TwitterClient`, scrapers, actions y wrappers sync desde un solo import
+- **🔄 GraphQL auto-refresh**: si un queryId se rompe, el cliente reintenta tras refrescar IDs (bundle logueado → anónimo → twikit) — `xactions gql-status` / `xactions gql-refresh`
+- **📜 LICENSE MIT** y marcador `py.typed` (soporte de tipos estáticos)
+- **🖥️ CLI/MCP**: `xactions ...` y `python -m xactions.mcp_server` (ya no `python cli/xactions.py`)
+- **🤖 MCP 2.x**: compatible con `mcp>=2` (`MCPServer`) y `mcp` 1.x (`FastMCP`)
+
+> **Migración desde ≤1.4.x:** `from src.scraper...` / `from src.actions...` / `from cli.xactions import cli` → `from xactions...` / `from xactions.cli import cli`. El comando instalado sigue siendo `xactions`.
+
+<details>
+<summary>v1.4.0 changes</summary>
 
 - **🛡️ Seguridad anti-duplicados**: las mutations ya no se reintentan ante errores de red (un timeout no puede duplicar un like/tweet)
 - **🔑 CSRF auto-refresh**: `ct0` se actualiza solo cuando X lo rota en sesiones largas
@@ -38,6 +50,8 @@ The original XActions is great but depends on npm, which has been the target of 
 - **🔍 MCP `dry_run`**: `x_bulk_unfollow_non_followers` permite previsualizar sin ejecutar
 - **🪟 CI en Windows**: matriz con `windows-latest` además de Linux
 - **🧪 40 tests** (8 nuevos: mutation no-retry, ct0 refresh, `close()` en loop, CLI)
+
+</details>
 
 <details>
 <summary>v1.3.0 changes</summary>
@@ -117,18 +131,27 @@ them automatically when one hits a rate limit or dies:
 auth_token=ACCOUNT1_TOKEN; ct0=ACCOUNT1_CT0
 auth_token=ACCOUNT2_TOKEN; ct0=ACCOUNT2_CT0
 
-python cli/xactions.py search "crypto" --cookies-file cookies.txt --limit 200
-python cli/xactions.py validate --cookies-file cookies.txt   # checks every account
+chmod 600 cookies.txt   # Unix: restringe permisos
+
+xactions search "crypto" --cookies-file cookies.txt --limit 200
+xactions validate --cookies-file cookies.txt   # checks every account
 ```
+
+### Security notes (v1.5.0)
+
+- Prefer `TWITTER_COOKIES` in `.env` or `--cookies-file` over `--cookies` on the command line (argv can end up in shell history).
+- The CLI warns if you pass `--cookies` inline or if a cookies file is world-readable (Unix `chmod 600`).
+- Logs and error messages never print cookie **values** (only `auth_token=***`).
+- Never commit `.env` / `cookies.txt` (already in `.gitignore`).
 
 ---
 
 ## Usage
 
-### Sync wrappers (v1.1.0 — easiest way)
+### Sync wrappers (easiest way)
 
 ```python
-from src.scraper.scrapers import search_tweets_sync, scrape_profile_sync
+from xactions import search_tweets_sync, scrape_profile_sync
 
 cookies = "auth_token=xxx; ct0=yyy"
 
@@ -143,21 +166,17 @@ profile = scrape_profile_sync(cookies, "elonmusk")
 print(f"@{profile['username']} — {profile['followers']} followers")
 ```
 
-### Async API (original)
+### Async API
 
 ```python
 import asyncio
-from src.scraper.client import TwitterClient
-from src.scraper.scrapers import search_tweets, scrape_profile
+from xactions import TwitterClient, scrape_profile, search_tweets
 
 async def main():
-    client = TwitterClient(cookies="auth_token=xxx; ct0=yyy")
-    
-    # Search tweets
-    tweets = await search_tweets(client, "AI", limit=50, mode="Top")
-    
-    # Get profile
-    profile = await scrape_profile(client, "elonmusk")
+    async with TwitterClient(cookies="auth_token=xxx; ct0=yyy") as client:
+        tweets = await search_tweets(client, "AI", limit=50, mode="Top")
+        profile = await scrape_profile(client, "elonmusk")
+        print(profile["username"], len(tweets))
 
 asyncio.run(main())
 ```
@@ -165,58 +184,66 @@ asyncio.run(main())
 ### CLI
 
 ```bash
-# Profile
-python cli/xactions.py profile elonmusk
-python cli/xactions.py profile elonmusk --csv profile.csv
+# Tras pip install -e . el comando es `xactions` (o python -m xactions.cli)
+xactions profile elonmusk
+xactions profile elonmusk --csv profile.csv
 
 # Validate cookies
-python cli/xactions.py validate
-python cli/xactions.py validate --cookies-file cookies.txt
+xactions validate
+xactions validate --cookies-file cookies.txt
 
 # Followers / Following
-python cli/xactions.py followers elonmusk --limit 100 --table
-python cli/xactions.py following elonmusk --output following.json
+xactions followers elonmusk --limit 100 --table
+xactions following elonmusk --output following.json
 
 # Who doesn't follow you back
-python cli/xactions.py non-followers YOUR_USERNAME --table
+xactions non-followers YOUR_USERNAME --table
 
 # Tweets and search
-python cli/xactions.py tweets elonmusk --limit 50 --table
-python cli/xactions.py search "artificial intelligence" --mode Top
+xactions tweets elonmusk --limit 50 --table
+xactions search "artificial intelligence" --mode Top
+xactions search "crypto" --from elonmusk --min-faves 100 --lang es --exclude-retweets
+
+# Thread (hilo)
+xactions thread "Parte 1 del hilo" "Parte 2" "Cierre"
+xactions thread --from-file hilo.txt --delay 2
+
+# Compare accounts
+xactions compare userA userB --limit 50
 
 # Engagement & conversation
-python cli/xactions.py replies 1234567890 --limit 30 --table
-python cli/xactions.py likers 1234567890 --limit 100 --csv likers.csv
-python cli/xactions.py retweeters 1234567890 --limit 100
-python cli/xactions.py likes elonmusk --limit 50
+xactions replies 1234567890 --limit 30 --table
+xactions likers 1234567890 --limit 100 --csv likers.csv
+xactions retweeters 1234567890 --limit 100
+xactions likes elonmusk --limit 50
 
 # Authenticated-only content
-python cli/xactions.py bookmarks --limit 50 --table
-python cli/xactions.py home --limit 50 --table
-python cli/xactions.py trends --table
+xactions bookmarks --limit 50 --table
+xactions home --limit 50 --table
+xactions trends --table
 
-# Analytics & tracking (v1.3.0)
-python cli/xactions.py analyze elonmusk --limit 100
-python cli/xactions.py track elonmusk          # snapshot to SQLite
-python cli/xactions.py history elonmusk        # follower evolution
+# Analytics & tracking
+xactions analyze elonmusk --limit 100
+xactions track elonmusk          # snapshot to SQLite
+xactions history elonmusk        # follower evolution
 
 # Export formats
-python cli/xactions.py tweets elonmusk --csv tweets.csv
-python cli/xactions.py tweets elonmusk --ndjson tweets.ndjson
+xactions tweets elonmusk --csv tweets.csv
+xactions tweets elonmusk --ndjson tweets.ndjson
 
 # Write actions (require auth_token)
-python cli/xactions.py post "Hello from xactions-py 🐍"
-python cli/xactions.py post "With image" --media photo.jpg --media meme.png
-python cli/xactions.py like 1234567890
-python cli/xactions.py unlike 1234567890
-python cli/xactions.py bookmark 1234567890
-python cli/xactions.py unbookmark 1234567890
-python cli/xactions.py follow jack
-python cli/xactions.py unfollow jack
+xactions post "Hello from xactions-py 🐍"
+xactions post "With image" --media photo.jpg --media meme.png
+xactions like 1234567890
+xactions unlike 1234567890
+xactions bookmark 1234567890
+xactions unbookmark 1234567890
+xactions follow jack
+xactions unfollow jack
 
 # Bulk unfollow non-followers
-python cli/xactions.py bulk-unfollow YOUR_USERNAME --dry-run   # preview first!
-python cli/xactions.py bulk-unfollow YOUR_USERNAME --limit 200 --delay 2.5
+xactions bulk-unfollow YOUR_USERNAME --dry-run   # preview first!
+xactions bulk-unfollow YOUR_USERNAME --limit 200 --delay 2.5
 ```
 
 ---
@@ -257,7 +284,7 @@ Each tweet returned by `search_tweets` / `search_tweets_sync` contains:
 Works with Claude Desktop, any MCP-compatible agent, or local agents like [OpenClaw](https://openclaw.ai).
 
 ```bash
-TWITTER_COOKIES="auth_token=xxx; ct0=yyy" python src/mcp_tools/server.py
+TWITTER_COOKIES="auth_token=xxx; ct0=yyy" python -m xactions.mcp_server
 ```
 
 ### Claude Desktop config (`claude_desktop_config.json`):
@@ -266,8 +293,8 @@ TWITTER_COOKIES="auth_token=xxx; ct0=yyy" python src/mcp_tools/server.py
 {
   "mcpServers": {
     "xactions-py": {
-      "command": "python3",
-      "args": ["/path/to/xactions-py/src/mcp_tools/server.py"],
+      "command": "python",
+      "args": ["-m", "xactions.mcp_server"],
       "env": {
         "TWITTER_COOKIES": "auth_token=YOUR_TOKEN; ct0=YOUR_CT0"
       }
@@ -316,25 +343,25 @@ TWITTER_COOKIES="auth_token=xxx; ct0=yyy" python src/mcp_tools/server.py
 ```
 xactions-py/
 ├── src/
-│   ├── scraper/
-│   │   ├── client.py       # TwitterClient — async HTTP with httpx
-│   │   ├── pool.py         # ClientPool — multi-account rotation
-│   │   └── scrapers.py     # profile, followers, tweets, search, replies, bookmarks, trends + sync wrappers
-│   ├── actions/
-│   │   └── actions.py      # like, follow, tweet, bookmark, media upload, bulk_unfollow
-│   ├── analytics/
-│   │   └── analyzer.py     # engagement analytics (pure stdlib)
-│   ├── storage/
-│   │   └── db.py           # SQLite metric tracking
-│   └── mcp_tools/
-│       └── server.py       # MCP server (FastMCP)
-├── cli/
-│   └── xactions.py         # CLI (Click)
-├── tests/                  # pytest + respx (40 tests)
+│   └── xactions/           # paquete instalable
+│       ├── __init__.py     # API pública (TwitterClient, scrapers, actions…)
+│       ├── client.py       # TwitterClient — async HTTP with httpx
+│       ├── pool.py         # ClientPool — multi-account rotation
+│       ├── scrapers.py     # profile, followers, tweets, search… + sync wrappers
+│       ├── actions.py      # like, follow, tweet, bookmark, media, bulk_unfollow
+│       ├── analyzer.py     # engagement analytics (pure stdlib)
+│       ├── db.py           # SQLite metric tracking
+│       ├── gql_refresh.py  # auto-refresh de GraphQL query IDs
+│       ├── cli.py          # CLI (Click) → entry point `xactions`
+│       ├── mcp_server.py   # MCP server (mcp 2.x MCPServer / 1.x FastMCP)
+│       └── py.typed
+├── tests/                  # pytest + respx (78 tests)
 ├── .github/workflows/
 │   └── ci.yml              # ruff + pytest on 3.10–3.13
+├── Implementation_Plan/    # plan de trabajo v1.5.0
 ├── .env.example
 ├── .gitignore
+├── LICENSE
 ├── pyproject.toml
 ├── CHANGELOG.md
 └── README.md
@@ -365,13 +392,14 @@ Twitter's GraphQL API uses **GET** for most read queries but requires **POST** f
 
 ### GraphQL Query IDs
 
-Twitter's internal query IDs change when they deploy new JS bundles. If an endpoint stops working:
+Twitter's internal query IDs change when they deploy new JS bundles. v1.5.0 mitigates this:
 
-1. Fetch `https://x.com` and find the main JS bundle URL
-2. Search for `queryId:"...",operationName:"EndpointName"`
-3. Update `src/scraper/client.py`
+1. **Auto-refresh** — on a stale query (HTTP 404 / “Query does not exist”), the client refreshes IDs once and retries.
+2. **Manual** — `xactions gql-refresh` (or `gql-status` to inspect the cache).
+3. Cache lives at `~/.xactions/gql_endpoints.json`.
+4. Discovery multi-fuente: bundle logueado de X (si hay cookies) → bundle anónimo → [twikit `gql.py`](https://github.com/d60/twikit/blob/main/twikit/client/gql.py) como fallback.
 
-Or reference [twikit/gql.py](https://github.com/d60/twikit/blob/main/twikit/client/gql.py) which keeps them up to date.
+If an endpoint still fails after refresh, check twikit or update `src/xactions/client.py` defaults.
 
 ---
 

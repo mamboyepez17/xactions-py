@@ -4,7 +4,7 @@ import httpx
 import respx
 from click.testing import CliRunner
 
-from cli.xactions import cli
+from xactions.cli import cli
 
 
 @respx.mock

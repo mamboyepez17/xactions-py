@@ -4,8 +4,8 @@ import httpx
 import pytest
 import respx
 
-from src.scraper.client import ForbiddenError, TwitterClient
-from src.scraper.scrapers import (
+from xactions.client import ForbiddenError, TwitterClient
+from xactions.scrapers import (
     _parse_tweet_list,
     _parse_user_list,
     clear_user_id_cache,
@@ -157,7 +157,7 @@ def test_parse_user_list():
 
 
 def test_safe_int_coerces_strings():
-    from src.scraper.scrapers import _safe_int
+    from xactions.scrapers import _safe_int
     assert _safe_int("123") == 123
     assert _safe_int(None) == 0
     assert _safe_int("abc") == 0

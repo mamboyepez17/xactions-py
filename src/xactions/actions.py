@@ -12,13 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import sys
+from collections.abc import Callable
 from typing import Any
 
-# Permitir importaciones absolutas desde src/ cuando se ejecuta el CLI/scripts.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from scraper.client import UPLOAD_BASE, AuthError, TwitterClient
+from .client import UPLOAD_BASE, AuthError, TwitterClient
 
 _log = logging.getLogger(__name__)
 
@@ -75,7 +72,73 @@ async def post_tweet(
             .get("tweet_results", {})
             .get("result", {})
     )
-    return {"success": bool(result), "tweet_id": result.get("rest_id")}
+    # TweetWithVisibilityResults anida el tweet real en .tweet
+    if isinstance(result, dict) and result.get("__typename") == "TweetWithVisibilityResults":
+        result = result.get("tweet") or {}
+
+    tweet_id = None
+    if isinstance(result, dict):
+        tweet_id = (
+            result.get("rest_id")
+            or (result.get("legacy") or {}).get("id_str")
+            or (result.get("tweet") or {}).get("rest_id")
+        )
+
+    # Errores GraphQL dentro del payload (sin HTTP error)
+    errors = data.get("errors") or []
+    error_msg = None
+    if errors:
+        error_msg = errors[0].get("message") if isinstance(errors[0], dict) else str(errors[0])
+
+    return {
+        "success": bool(tweet_id),
+        "tweet_id": tweet_id,
+        "error": error_msg,
+        "raw_keys": list(data.keys()) if not tweet_id else None,
+    }
+
+
+async def post_thread(
+    client: TwitterClient,
+    tweets: list[str],
+    delay_seconds: float = 1.5,
+) -> dict[str, Any]:
+    """
+    Publica un hilo: cada tweet responde al anterior.
+    Requiere auth. `delay_seconds` entre tweets para evitar rate limits.
+    """
+    _require_auth(client)
+    if not tweets:
+        return {"success": False, "tweet_ids": [], "error": "lista vacía"}
+
+    tweet_ids: list[str] = []
+    reply_to: str | None = None
+    for i, text in enumerate(tweets):
+        text = (text or "").strip()
+        if not text:
+            continue
+        result = await post_tweet(client, text, reply_to_id=reply_to)
+        if not result.get("success") or not result.get("tweet_id"):
+            return {
+                "success": False,
+                "tweet_ids": tweet_ids,
+                "failed_at": i,
+                "error": (
+                    result.get("error")
+                    or f"No se pudo publicar el tweet {i + 1}/{len(tweets)}"
+                ),
+            }
+        tweet_ids.append(result["tweet_id"])
+        reply_to = result["tweet_id"]
+        if i < len(tweets) - 1:
+            await asyncio.sleep(delay_seconds)
+
+    return {
+        "success": True,
+        "tweet_ids": tweet_ids,
+        "root_id": tweet_ids[0] if tweet_ids else None,
+        "count": len(tweet_ids),
+    }
 
 
 async def delete_tweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
@@ -181,11 +244,11 @@ async def bulk_unfollow(
     client: TwitterClient,
     user_ids: list,
     delay_seconds: float = 2.0,
-    on_progress: callable | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     """
     Hace unfollow masivo con delay entre cada acción para evitar rate limits.
-    on_progress: callable(current, total, username) opcional.
+    on_progress: callback(current, total, user_id) opcional.
     """
     _require_auth(client)
     success = 0

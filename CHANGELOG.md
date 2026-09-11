@@ -1,5 +1,67 @@
 # Changelog
 
+## v1.5.0 — 2026-08-17
+
+### Added (B2 GraphQL resilience)
+- **Auto-refresh de GraphQL query IDs** (`xactions/gql_refresh.py`):
+  - Parser de bundles de x.com (responsive-web y x-web + assets relativos).
+  - Formatos: `queryId`/`operationName` clásico y Relay `id`/`name`.
+  - **Multi-fuente:** bundle logueado (si hay cookies) → bundle anónimo → fallback twikit.
+  - Cache en `~/.xactions/gql_endpoints.json`.
+- CLI: `xactions gql-status` y `xactions gql-refresh` (acepta cookies para crawl logueado).
+- `TwitterClient.refresh_gql_endpoints()` — refresh con las cookies de la sesión.
+- El cliente reintenta una vez si un endpoint devuelve 404 / “Query does not exist” (pasando sus cookies al refresh).
+- Env `XACTIONS_NO_GQL_REFRESH=1` para tests/CI sin red.
+
+### Added (B5 features)
+- **`build_search_query()`**: operadores `from:`, `to:`, `since:`, `until:`, `min_faves:`, `lang:`, `filter:media`, `-filter:retweets`…
+- **CLI `search`**: flags `--from`, `--to`, `--since`, `--until`, `--min-faves`, `--min-retweets`, `--lang`, `--exclude-retweets`, `--exclude-replies`, `--media`.
+- **`post_thread()` / CLI `thread` / MCP `x_post_thread`**: hilos encadenando replies.
+- **`compare_accounts()` / CLI `compare` / MCP `x_compare_accounts`**: métricas lado a lado de dos cuentas.
+- MCP `x_build_search_query`.
+
+### Added (B4 rate-limit + paginación)
+- **Throttle proactivo**: el client guarda `x-rate-limit-remaining` / `x-rate-limit-reset` por endpoint y espera *antes* del request si remaining=0 (en vez de solo reaccionar al 429).
+- **`max_rate_limit_wait`** configurable en `TwitterClient` (default 60s); el wait del 429 también se capa con ese valor.
+- `client.rate_limit_status()` para inspección.
+- **Páginas más grandes**: Followers/Following 100, engagement 50, tweets/home 40 (search sigue en 20 por límite de la API).
+
+### Added (B3 seguridad cookies)
+- Módulo `xactions/security.py`: `redact_cookies` / `redact_in_text` (nunca imprime valores).
+- CLI: warning no bloqueante si pasas cookies con `--cookies` (historial del shell).
+- CLI: warning si `--cookies-file` es legible por otros en Unix (sugiere `chmod 600`).
+- Mensajes de error del CLI redactan `auth_token=` / `ct0=` si aparecen.
+- Docs de seguridad en README.
+
+### Changed (BREAKING para imports)
+- El código vive ahora en el paquete instalable `src/xactions/` (antes carpetas sueltas `src/scraper`, `src/actions`, `src/analytics`, `src/storage`, `src/mcp_tools` + `cli/`).
+- **Guía de migración:**
+  - `from src.scraper.client import TwitterClient` → `from xactions.client import TwitterClient` (o `from xactions import TwitterClient`)
+  - `from src.scraper.scrapers import search_tweets` → `from xactions.scrapers import search_tweets` (o desde `xactions`)
+  - `from src.actions.actions import like_tweet` → `from xactions.actions import like_tweet`
+  - `from cli.xactions import cli` → `from xactions.cli import cli`
+  - MCP: `python src/mcp_tools/server.py` → `python -m xactions.mcp_server`
+- Entry point del CLI: `xactions = xactions.cli:cli` (el comando `xactions` no cambia).
+- Eliminados todos los `sys.path.insert`.
+- `pyproject.toml`: packages bajo `src/`, `pythonpath` para pytest, ruff `src`.
+
+### Added
+- `LICENSE` MIT en la raíz.
+- `py.typed` en el paquete `xactions` (PEP 561).
+- `xactions/__init__.py` con API pública (`__all__`, `__version__`).
+- README actualizado con la nueva estructura y ejemplos de import.
+- MCP compatible con `mcp` 2.x (`MCPServer`) y 1.x (`FastMCP`).
+
+### Fixed
+- `bulk_unfollow.on_progress` tipado como `Callable[[int, int, str], None]` (antes `callable`, inválido).
+- `post_tweet` extrae `tweet_id` de más formas de respuesta GraphQL (`rest_id`, `legacy.id_str`, `TweetWithVisibilityResults`).
+- `validate_cookies`: usa GraphQL (`HomeLatestTimeline`) en vez del REST `verify_credentials` deprecado.
+- CLI `post` muestra el mensaje de error de la API (antes solo “No se pudo publicar”).
+- Live test: validate/post/delete OK; hilo limitado por cupo diario de X (error 344), no por bug del cliente.
+
+### Tests
+- **78 passing** (+38 desde v1.4.0): packaging, GraphQL refresh, seguridad, rate-limit, features B5.
+
 ## v1.4.0 — 2026-08-17
 
 ### Fixed

@@ -1,6 +1,6 @@
 """Tests para el módulo de analytics."""
 
-from src.analytics.analyzer import analyze_tweets, parse_tweet_date
+from xactions.analyzer import analyze_tweets, parse_tweet_date
 
 
 def _tweet(**kwargs):

@@ -2,8 +2,8 @@
 
 import pytest
 
-from src.scraper.client import AuthError, RateLimitError, TwitterError
-from src.scraper.pool import ClientPool
+from xactions.client import AuthError, RateLimitError, TwitterError
+from xactions.pool import ClientPool
 
 
 class StubClient:

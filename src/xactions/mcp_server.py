@@ -1,12 +1,15 @@
 """
 XActions-PY — MCP Server
 Servidor MCP para agentes AI (Claude, Mambo, etc.)
-Sin npm. Usa FastMCP + httpx puro.
+Sin npm. Usa MCPServer (mcp>=2) o FastMCP (mcp 1.x) + httpx puro.
 
 v1.2.0:
   - Herramientas nuevas: replies, favoriters, retweeters, user likes, bookmarks,
     home timeline, trending topics, validación de cookies, bookmark/unbookmark.
   - Mejor manejo de errores (ForbiddenError).
+
+v1.5.0:
+  - Compatible con mcp 2.x (MCPServer) y mcp 1.x (FastMCP).
 """
 
 from __future__ import annotations
@@ -20,26 +23,27 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Importar cliente y scrapers
-import sys
+try:
+    # mcp >= 2
+    from mcp.server.mcpserver import MCPServer as _MCPServer
+except ImportError:  # pragma: no cover - compat mcp 1.x
+    from mcp.server.fastmcp import FastMCP as _MCPServer
 
-from mcp.server.fastmcp import FastMCP
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
-from actions.actions import (
+from .actions import (
     bulk_unfollow,
     create_bookmark,
     delete_bookmark,
     delete_tweet,
     follow_user,
     like_tweet,
+    post_thread,
     post_tweet,
     retweet,
     unfollow_user,
     unlike_tweet,
 )
-from scraper.client import (
+from .analyzer import analyze_tweets, compare_accounts
+from .client import (
     AuthError,
     ForbiddenError,
     NotFoundError,
@@ -47,8 +51,8 @@ from scraper.client import (
     TwitterClient,
     TwitterError,
 )
-from scraper.pool import ClientPool
-from scraper.scrapers import (
+from .pool import ClientPool
+from .scrapers import (
     get_bookmarks,
     get_home_timeline,
     get_trends,
@@ -64,12 +68,13 @@ from scraper.scrapers import (
     scrape_tweets,
     search_tweets,
 )
+from .search_query import build_search_query
 
 # ─── Inicialización ───────────────────────────────────────────────────────────
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-mcp = FastMCP(
+mcp = _MCPServer(
     "xactions-py",
     instructions="X/Twitter automation toolkit — Python port of XActions. Sin npm.",
 )
@@ -350,8 +355,6 @@ async def x_analyze_user(username: str, limit: int = 100) -> str:
     limit: cuántos tweets recientes analizar (default 100)
     """
     try:
-        from analytics.analyzer import analyze_tweets
-
         client = get_client()
         profile = await scrape_profile(client, username)
         tweets = await scrape_tweets(client, username, limit=limit)
@@ -394,6 +397,74 @@ async def x_post_tweet(
         return "❌ No se pudo publicar el tweet."
     except Exception as e:
         return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_post_thread(tweets: list[str], delay: float = 1.5) -> str:
+    """
+    Publica un hilo de tweets (cada uno responde al anterior). Requiere auth.
+    tweets: lista de textos en orden
+    delay: segundos entre tweets (default 1.5)
+    """
+    try:
+        client = get_client()
+        result = await post_thread(client, tweets, delay_seconds=delay)
+        if result["success"]:
+            return (
+                f"✅ Hilo publicado ({result['count']} tweets).\n"
+                f"  Root: {result['root_id']}\n"
+                f"  IDs: {', '.join(result['tweet_ids'])}"
+            )
+        return f"❌ {result.get('error', 'Error publicando hilo')}"
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_compare_accounts(user_a: str, user_b: str, limit: int = 50) -> str:
+    """
+    Compara dos cuentas: followers, engagement rate y promedios.
+    user_a / user_b: nombres de usuario sin @
+    limit: tweets recientes a analizar por cuenta (default 50)
+    """
+    try:
+        client = get_client()
+        prof_a, tw_a, prof_b, tw_b = await asyncio.gather(
+            scrape_profile(client, user_a),
+            scrape_tweets(client, user_a, limit=limit),
+            scrape_profile(client, user_b),
+            scrape_tweets(client, user_b, limit=limit),
+        )
+        report = compare_accounts(prof_a, tw_a, prof_b, tw_b)
+        return json.dumps(report, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_build_search_query(
+    base: str = "",
+    from_user: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    min_faves: int | None = None,
+    lang: str | None = None,
+    exclude_retweets: bool = False,
+) -> str:
+    """
+    Construye una query de búsqueda avanzada de X (operadores from/since/min_faves…).
+    Úsala con x_search_tweets.
+    """
+    q = build_search_query(
+        base,
+        from_user=from_user,
+        since=since,
+        until=until,
+        min_faves=min_faves,
+        lang=lang,
+        exclude_retweets=exclude_retweets,
+    )
+    return json.dumps({"query": q}, ensure_ascii=False)
 
 
 @mcp.tool()

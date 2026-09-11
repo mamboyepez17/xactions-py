@@ -23,6 +23,7 @@ import csv
 import functools
 import json
 import os
+import re
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
@@ -41,24 +42,24 @@ if sys.platform == "win32":
         except (AttributeError, ValueError):
             pass
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from actions.actions import (
+from .actions import (
     bulk_unfollow,
     create_bookmark,
     delete_bookmark,
     delete_tweet,
     follow_user,
     like_tweet,
+    post_thread,
     post_tweet,
     unfollow_user,
     unlike_tweet,
     upload_media,
 )
-from analytics.analyzer import analyze_tweets
-from scraper.client import TwitterClient
-from scraper.pool import ClientPool
-from scraper.scrapers import (
+from .analyzer import analyze_tweets, compare_accounts
+from .client import TwitterClient
+from .db import TrackerDB, compute_profile_delta
+from .pool import ClientPool
+from .scrapers import (
     get_bookmarks,
     get_home_timeline,
     get_trends,
@@ -74,7 +75,12 @@ from scraper.scrapers import (
     scrape_tweets,
     search_tweets,
 )
-from storage.db import TrackerDB, compute_profile_delta
+from .search_query import build_search_query
+from .security import (
+    check_cookies_file_permissions,
+    redact_in_text,
+    warn_cli_cookies,
+)
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -86,7 +92,7 @@ AnyClient = TwitterClient | ClientPool
 try:
     __version__ = version("xactions-py")
 except PackageNotFoundError:
-    __version__ = "1.4.0"
+    __version__ = "1.5.0"
 
 
 def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
@@ -99,6 +105,9 @@ def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
     if cookies_file:
         if not os.path.exists(cookies_file):
             raise click.ClickException(f"Archivo no encontrado: {cookies_file}")
+        perm_warn = check_cookies_file_permissions(cookies_file)
+        if perm_warn:
+            click.echo(f"⚠️  {perm_warn}", err=True)
         with open(cookies_file, encoding="utf-8") as f:
             raw = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
     else:
@@ -111,10 +120,18 @@ def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
 def get_client(cookies: str = "", cookies_file: str | None = None) -> AnyClient:
     """Devuelve un TwitterClient (1 cookie) o un ClientPool (varias)."""
     cookie_list = _load_cookies_list(cookies, cookies_file)
+    cli_warn = warn_cli_cookies(cookies)
+    if cli_warn:
+        click.echo(f"⚠️  {cli_warn}", err=True)
     proxy = os.getenv(PROXY_ENV)
     if len(cookie_list) > 1:
         return ClientPool(cookie_list, proxy=proxy)
     return TwitterClient(cookies=cookie_list[0] if cookie_list else "", proxy=proxy)
+
+
+def _safe_error_message(e: Exception) -> str:
+    """Mensaje de error sin valores de cookies (por si vienen en el texto)."""
+    return redact_in_text(str(e))
 
 
 def with_client(func):
@@ -129,13 +146,22 @@ def with_client(func):
         cookies = kwargs.pop("cookies", "")
         cookies_file = kwargs.pop("cookies_file", None)
         client = get_client(cookies, cookies_file)
+        exit_code = 0
         try:
             return func(client, *args, **kwargs)
+        except SystemExit as e:
+            exit_code = e.code if isinstance(e.code, int) else 1
+            raise
         except Exception as e:
-            click.echo(f"❌ {e}", err=True)
-            sys.exit(1)
+            click.echo(f"❌ {_safe_error_message(e)}", err=True)
+            exit_code = 1
         finally:
-            run(client.aclose())
+            try:
+                run(client.aclose())
+            except Exception:
+                pass
+            if exit_code:
+                sys.exit(exit_code)
 
     return wrapper
 
@@ -310,7 +336,12 @@ def print_analysis(report: dict[str, Any], username: str):
 
 def common_options(fn):
     """Opciones comunes para comandos de lectura."""
-    fn = click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")(fn)
+    fn = click.option(
+        "--cookies",
+        envvar=COOKIES_ENV,
+        default="",
+        help="Cookies de sesión (preferir .env TWITTER_COOKIES o --cookies-file)",
+    )(fn)
     fn = click.option("--cookies-file", type=click.Path(exists=True), default=None,
                       help="Archivo con cookies (una por línea = pool multi-cuenta)")(fn)
     fn = click.option("--output", "-o", default=None, help="Archivo JSON de salida")(fn)
@@ -432,20 +463,49 @@ def tweets(client, username, limit, replies, output, csv_path, ndjson_path, tabl
 
 
 @cli.command()
-@click.argument("query")
+@click.argument("query", required=False, default="")
 @click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de resultados")
 @click.option("--mode", default="Top", type=click.Choice(["Latest", "Top"]), show_default=True)
+@click.option("--from", "from_user", default=None, help="Operador from:USERNAME")
+@click.option("--to", "to_user", default=None, help="Operador to:USERNAME")
+@click.option("--since", default=None, help="since:YYYY-MM-DD")
+@click.option("--until", default=None, help="until:YYYY-MM-DD")
+@click.option("--min-faves", type=int, default=None, help="min_faves:N")
+@click.option("--min-retweets", type=int, default=None, help="min_retweets:N")
+@click.option("--lang", default=None, help="lang:es|en|...")
+@click.option("--exclude-retweets", is_flag=True, help="-filter:retweets")
+@click.option("--exclude-replies", is_flag=True, help="-filter:replies")
+@click.option("--media", "filter_media", is_flag=True, help="filter:media")
 @common_options
 @with_client
-def search(client, query, limit, mode, output, csv_path, ndjson_path, table):
-    """Busca tweets por query."""
-    data = run(search_tweets(client, query, limit=limit, mode=mode))
+def search(
+    client, query, limit, mode, from_user, to_user, since, until,
+    min_faves, min_retweets, lang, exclude_retweets, exclude_replies, filter_media,
+    output, csv_path, ndjson_path, table,
+):
+    """Busca tweets por query (acepta operadores avanzados)."""
+    q = build_search_query(
+        query,
+        from_user=from_user,
+        to_user=to_user,
+        since=since,
+        until=until,
+        min_faves=min_faves,
+        min_retweets=min_retweets,
+        lang=lang,
+        exclude_retweets=exclude_retweets,
+        exclude_replies=exclude_replies,
+        filter_media=filter_media,
+    )
+    if not q.strip():
+        raise click.ClickException("Query vacía: pasa un término o flags (--from, --lang, …)")
+    data = run(search_tweets(client, q, limit=limit, mode=mode))
     _handle_output(
-        {"query": query, "count": len(data), "tweets": data},
+        {"query": q, "count": len(data), "tweets": data},
         output, csv_path, ndjson_path,
         csv_data=_flatten_tweets(data),
         table_fn=print_tweets_table if table else None,
-        table_title=f'Resultados: "{query}" ({mode})',
+        table_title=f'Resultados: "{q}" ({mode})',
     )
 
 
@@ -688,8 +748,97 @@ def post(client, text, reply_to, media_files):
     if result["success"]:
         click.echo(f"✅ Tweet publicado! ID: {result['tweet_id']}")
     else:
-        click.echo("❌ No se pudo publicar.", err=True)
+        click.echo(f"❌ No se pudo publicar. {result.get('error') or ''}", err=True)
         sys.exit(1)
+
+
+@cli.command()
+@click.argument("tweets", nargs=-1)
+@click.option("--from-file", type=click.Path(exists=True), default=None,
+              help="Archivo de texto: un tweet por línea o separados por ---")
+@click.option("--delay", default=1.5, show_default=True, help="Segundos entre tweets del hilo")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@with_client
+def thread(client, tweets, from_file, delay):
+    """Publica un hilo. Cada argumento es un tweet, o usa --from-file."""
+    parts: list[str] = []
+    if from_file:
+        raw = open(from_file, encoding="utf-8").read()
+        # separar por --- o saltos dobles si no hay ---
+        if "\n---\n" in raw or raw.strip().startswith("---"):
+            chunks = [c.strip() for c in re.split(r"\n?---\n?", raw) if c.strip()]
+        else:
+            chunks = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        parts.extend(chunks)
+    parts.extend(t.strip() for t in tweets if t and t.strip())
+
+    if not parts:
+        raise click.ClickException("Pasa tweets como argumentos o usa --from-file")
+
+    click.echo(f"🧵 Publicando hilo de {len(parts)} tweets…")
+    result = run(post_thread(client, parts, delay_seconds=delay))
+    if result["success"]:
+        click.echo(f"✅ Hilo publicado. Root: {result['root_id']} ({result['count']} tweets)")
+    else:
+        click.echo(f"❌ {result.get('error', 'Error')}", err=True)
+        if result.get("tweet_ids"):
+            click.echo(f"   Publicados parcialmente: {', '.join(result['tweet_ids'])}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument("user_a")
+@click.argument("user_b")
+@click.option("--limit", "-l", default=50, show_default=True, help="Tweets a analizar por cuenta")
+@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--table", is_flag=True, help="Mostrar como tabla")
+@with_client
+def compare(client, user_a, user_b, limit, output, table):
+    """Compara dos cuentas: followers, engagement rate y promedios."""
+
+    async def _collect():
+        prof_a, tw_a, prof_b, tw_b = await asyncio.gather(
+            scrape_profile(client, user_a),
+            scrape_tweets(client, user_a, limit=limit),
+            scrape_profile(client, user_b),
+            scrape_tweets(client, user_b, limit=limit),
+        )
+        return prof_a, tw_a, prof_b, tw_b
+
+    prof_a, tw_a, prof_b, tw_b = run(_collect())
+    report = compare_accounts(prof_a, tw_a, prof_b, tw_b)
+
+    if output:
+        print_json(report, output)
+        return
+
+    a, b = report["a"], report["b"]
+    click.echo(f"\n{'═'*60}")
+    click.echo(f"  Comparativa @{a['username']} vs @{b['username']}")
+    click.echo(f"{'═'*60}")
+    click.echo(f"  {'Métrica':<28} {'@' + str(a['username']):>14} {'@' + str(b['username']):>14}")
+    click.echo(f"  {'-'*56}")
+    rows = [
+        ("Followers", a.get("followers"), b.get("followers")),
+        ("Following", a.get("following"), b.get("following")),
+        ("Tweets (total)", a.get("tweets_count"), b.get("tweets_count")),
+        ("Avg likes", (a.get("averages") or {}).get("likes"), (b.get("averages") or {}).get("likes")),
+        ("Avg RTs", (a.get("averages") or {}).get("retweets"), (b.get("averages") or {}).get("retweets")),
+        ("Avg views", (a.get("averages") or {}).get("views"), (b.get("averages") or {}).get("views")),
+        ("ER followers %", a.get("engagement_rate_followers"), b.get("engagement_rate_followers")),
+    ]
+    for label, va, vb in rows:
+        fa = f"{va:,}" if isinstance(va, (int, float)) else "—"
+        fb = f"{vb:,}" if isinstance(vb, (int, float)) else "—"
+        click.echo(f"  {label:<28} {fa:>14} {fb:>14}")
+    winners = report.get("winner") or {}
+    click.echo(f"\n  Ganadores: followers={winners.get('followers')} · "
+               f"ER={winners.get('engagement_rate_followers')} · "
+               f"likes={winners.get('avg_likes')}")
+    click.echo(f"{'═'*60}\n")
 
 
 @cli.command()
@@ -840,6 +989,80 @@ def validate(client):
     else:
         click.echo(f"❌ Cookies inválidas: {result.get('error')}", err=True)
         sys.exit(1)
+
+
+# ─── GraphQL endpoints ────────────────────────────────────────────────────────
+
+@cli.command("gql-status")
+@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+def gql_status(output):
+    """Muestra el estado del cache de GraphQL query IDs."""
+    from .client import _DEFAULT_GRAPHQL_ENDPOINTS, GRAPHQL_ENDPOINTS
+    from .gql_refresh import cache_status
+
+    status = cache_status()
+    payload = {
+        **status,
+        "loaded": {
+            name: {
+                "queryId": ep.get("queryId"),
+                "operationName": ep.get("operationName"),
+                "method": ep.get("method", "GET"),
+            }
+            for name, ep in sorted(GRAPHQL_ENDPOINTS.items())
+        },
+        "defaults_count": len(_DEFAULT_GRAPHQL_ENDPOINTS),
+    }
+    if output:
+        print_json(payload, output)
+        return
+
+    click.echo(f"\n{'─'*55}")
+    click.echo("  GraphQL query IDs")
+    click.echo(f"{'─'*55}")
+    if status["exists"]:
+        click.echo(f"  Cache:  {status['path']}")
+        click.echo(f"  Update: {status.get('updated_at')}")
+        click.echo(f"  Source: {status.get('source')}")
+    else:
+        click.echo(f"  Cache:  (sin archivo) {status['path']}")
+        click.echo("  Usando solo defaults embebidos")
+    click.echo(f"  Endpoints cargados: {len(GRAPHQL_ENDPOINTS)}")
+    click.echo(f"{'─'*55}\n")
+
+
+@cli.command("gql-refresh")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión (mejora el crawl logueado)")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+def gql_refresh_cmd(cookies, cookies_file, output):
+    """
+    Actualiza los GraphQL query IDs.
+
+    Con cookies se prioriza el bundle logueado de X; sin ellas se intenta
+    anónimo y se cae a twikit como fallback.
+    """
+    from .client import refresh_graphql_endpoints
+
+    cookie_list = _load_cookies_list(cookies, cookies_file)
+    cookie = cookie_list[0] if cookie_list else None
+    if cookie:
+        click.echo("🔐 Usando cookies para crawl logueado (sin imprimir el token)")
+    merged = run(refresh_graphql_endpoints(force=True, cookie=cookie))
+    changed = {
+        name: ep.get("queryId")
+        for name, ep in sorted(merged.items())
+        if ep.get("queryId")
+    }
+    if output:
+        print_json({"count": len(changed), "endpoints": changed}, output)
+        return
+    click.echo(f"\n✅ GraphQL endpoints actualizados ({len(changed)} con queryId)")
+    for name, qid in list(changed.items())[:8]:
+        click.echo(f"  {name}: {qid}")
+    if len(changed) > 8:
+        click.echo(f"  … y {len(changed) - 8} más")
+    click.echo("")
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
