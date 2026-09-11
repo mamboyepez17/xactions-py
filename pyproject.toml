@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xactions-py"
-version = "1.4.0"
+version = "1.5.0"
 description = "X/Twitter automation toolkit en Python puro. Sin npm. Sin Puppeteer."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,11 +21,11 @@ mcp = ["mcp[cli]>=1.0"]
 dev = ["pytest>=8.0", "respx>=0.22", "pytest-asyncio>=0.23", "ruff>=0.6"]
 
 [project.scripts]
-xactions = "cli.xactions:cli"
+xactions = "xactions.cli:cli"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["src*", "cli*"]
+where = ["src"]
+include = ["xactions*"]
 
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
@@ -33,16 +33,18 @@ include = ["src*", "cli*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.ruff]
 target-version = "py310"
 line-length = 120
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-# sys.path.insert debe ir antes de los imports del paquete
-"cli/xactions.py" = ["E402"]
-"src/mcp_tools/server.py" = ["E402"]
+# reconfigure de encoding Windows + load_dotenv antes de imports del paquete
+"src/xactions/cli.py" = ["E402"]
+"src/xactions/mcp_server.py" = ["E402"]

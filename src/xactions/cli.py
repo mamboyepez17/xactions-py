@@ -41,9 +41,7 @@ if sys.platform == "win32":
         except (AttributeError, ValueError):
             pass
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from actions.actions import (
+from .actions import (
     bulk_unfollow,
     create_bookmark,
     delete_bookmark,
@@ -55,10 +53,11 @@ from actions.actions import (
     unlike_tweet,
     upload_media,
 )
-from analytics.analyzer import analyze_tweets
-from scraper.client import TwitterClient
-from scraper.pool import ClientPool
-from scraper.scrapers import (
+from .analyzer import analyze_tweets
+from .client import TwitterClient
+from .db import TrackerDB, compute_profile_delta
+from .pool import ClientPool
+from .scrapers import (
     get_bookmarks,
     get_home_timeline,
     get_trends,
@@ -74,7 +73,6 @@ from scraper.scrapers import (
     scrape_tweets,
     search_tweets,
 )
-from storage.db import TrackerDB, compute_profile_delta
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -86,7 +84,7 @@ AnyClient = TwitterClient | ClientPool
 try:
     __version__ = version("xactions-py")
 except PackageNotFoundError:
-    __version__ = "1.4.0"
+    __version__ = "1.5.0"
 
 
 def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:

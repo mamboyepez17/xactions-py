@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.5.0 — 2026-08-17
+
+### Changed (BREAKING para imports)
+- El código vive ahora en el paquete instalable `src/xactions/` (antes carpetas sueltas `src/scraper`, `src/actions`, `src/analytics`, `src/storage`, `src/mcp_tools` + `cli/`).
+- **Guía de migración:**
+  - `from src.scraper.client import TwitterClient` → `from xactions.client import TwitterClient` (o `from xactions import TwitterClient`)
+  - `from src.scraper.scrapers import search_tweets` → `from xactions.scrapers import search_tweets` (o desde `xactions`)
+  - `from src.actions.actions import like_tweet` → `from xactions.actions import like_tweet`
+  - `from cli.xactions import cli` → `from xactions.cli import cli`
+  - MCP: `python src/mcp_tools/server.py` → `python -m xactions.mcp_server`
+- Entry point del CLI: `xactions = xactions.cli:cli` (el comando `xactions` no cambia).
+- Eliminados todos los `sys.path.insert`.
+- `pyproject.toml`: packages bajo `src/`, `pythonpath` para pytest, ruff `src`.
+
+### Added
+- `LICENSE` MIT en la raíz.
+- `py.typed` en el paquete `xactions` (PEP 561).
+- `xactions/__init__.py` con API pública (`__all__`, `__version__`).
+- README actualizado con la nueva estructura y ejemplos de import.
+
+### Fixed
+- `bulk_unfollow.on_progress` tipado como `Callable[[int, int, str], None]` (antes `callable`, inválido).
+
 ## v1.4.0 — 2026-08-17
 
 ### Fixed

@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from src.scraper.client import (
+from xactions.client import (
     BEARER_TOKEN,
     AuthError,
     ForbiddenError,
@@ -28,7 +28,7 @@ async def test_graphql_success(client):
     )
 
     # Sobrescribimos endpoint para el test
-    from src.scraper.client import GRAPHQL_ENDPOINTS
+    from xactions.client import GRAPHQL_ENDPOINTS
     old = GRAPHQL_ENDPOINTS["UserByScreenName"].copy()
     GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = "123"
     try:
@@ -57,7 +57,7 @@ async def test_rate_limit_raises(client):
         )
     )
 
-    from src.scraper.client import GRAPHQL_ENDPOINTS
+    from xactions.client import GRAPHQL_ENDPOINTS
     old = GRAPHQL_ENDPOINTS["UserByScreenName"].copy()
     GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = "123"
     try:
@@ -73,7 +73,7 @@ async def test_auth_error(client):
         return_value=httpx.Response(401, json={"error": "Unauthorized"})
     )
 
-    from src.scraper.client import GRAPHQL_ENDPOINTS
+    from xactions.client import GRAPHQL_ENDPOINTS
     old = GRAPHQL_ENDPOINTS["UserByScreenName"].copy()
     GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = "123"
     try:
@@ -89,7 +89,7 @@ async def test_forbidden_error(client):
         return_value=httpx.Response(403, json={"error": "Forbidden"})
     )
 
-    from src.scraper.client import GRAPHQL_ENDPOINTS
+    from xactions.client import GRAPHQL_ENDPOINTS
     old = GRAPHQL_ENDPOINTS["SearchTimeline"].copy()
     GRAPHQL_ENDPOINTS["SearchTimeline"]["queryId"] = "123"
     try:
@@ -106,7 +106,7 @@ async def test_network_retry():
         side_effect=[httpx.ConnectError("Connection failed"), httpx.Response(200, json={"data": {}})]
     )
 
-    from src.scraper.client import GRAPHQL_ENDPOINTS
+    from xactions.client import GRAPHQL_ENDPOINTS
     old = GRAPHQL_ENDPOINTS["UserByScreenName"].copy()
     GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = "123"
     try:
@@ -142,7 +142,7 @@ async def test_mutation_not_retried_on_network_error():
         side_effect=httpx.ConnectError("Connection failed")
     )
 
-    from src.scraper.client import GRAPHQL_ENDPOINTS
+    from xactions.client import GRAPHQL_ENDPOINTS
     old = GRAPHQL_ENDPOINTS["FavoriteTweet"].copy()
     GRAPHQL_ENDPOINTS["FavoriteTweet"]["queryId"] = "123"
     try:
@@ -165,7 +165,7 @@ async def test_csrf_token_updated_from_response(client):
         )
     )
 
-    from src.scraper.client import GRAPHQL_ENDPOINTS
+    from xactions.client import GRAPHQL_ENDPOINTS
     old = GRAPHQL_ENDPOINTS["UserByScreenName"].copy()
     GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = "123"
     try:

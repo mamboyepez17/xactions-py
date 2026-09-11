@@ -20,14 +20,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Importar cliente y scrapers
-import sys
-
 from mcp.server.fastmcp import FastMCP
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
-from actions.actions import (
+from .actions import (
     bulk_unfollow,
     create_bookmark,
     delete_bookmark,
@@ -39,7 +34,8 @@ from actions.actions import (
     unfollow_user,
     unlike_tweet,
 )
-from scraper.client import (
+from .analyzer import analyze_tweets
+from .client import (
     AuthError,
     ForbiddenError,
     NotFoundError,
@@ -47,8 +43,8 @@ from scraper.client import (
     TwitterClient,
     TwitterError,
 )
-from scraper.pool import ClientPool
-from scraper.scrapers import (
+from .pool import ClientPool
+from .scrapers import (
     get_bookmarks,
     get_home_timeline,
     get_trends,
@@ -350,8 +346,6 @@ async def x_analyze_user(username: str, limit: int = 100) -> str:
     limit: cuántos tweets recientes analizar (default 100)
     """
     try:
-        from analytics.analyzer import analyze_tweets
-
         client = get_client()
         profile = await scrape_profile(client, username)
         tweets = await scrape_tweets(client, username, limit=limit)

@@ -1,6 +1,6 @@
 """Tests para el tracking en SQLite."""
 
-from src.storage.db import TrackerDB, compute_profile_delta
+from xactions.db import TrackerDB, compute_profile_delta
 
 
 def test_db_saves_and_reads_profile_snapshots(tmp_path):

@@ -12,14 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import sys
 from collections.abc import Callable
 from typing import Any
 
-# Permitir importaciones absolutas desde src/ cuando se ejecuta el CLI/scripts.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from scraper.client import UPLOAD_BASE, AuthError, TwitterClient
+from .client import UPLOAD_BASE, AuthError, TwitterClient
 
 _log = logging.getLogger(__name__)
 
