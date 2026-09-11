@@ -333,7 +333,7 @@ xactions-py/
 │       ├── analyzer.py     # engagement analytics (pure stdlib)
 │       ├── db.py           # SQLite metric tracking
 │       ├── cli.py          # CLI (Click) → entry point `xactions`
-│       ├── mcp_server.py   # MCP server (FastMCP)
+│       ├── mcp_server.py   # MCP server (mcp 2.x MCPServer / 1.x FastMCP)
 │       └── py.typed
 ├── tests/                  # pytest + respx (40 tests)
 ├── .github/workflows/

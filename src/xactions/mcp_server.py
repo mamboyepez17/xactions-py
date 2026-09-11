@@ -1,12 +1,15 @@
 """
 XActions-PY — MCP Server
 Servidor MCP para agentes AI (Claude, Mambo, etc.)
-Sin npm. Usa FastMCP + httpx puro.
+Sin npm. Usa MCPServer (mcp>=2) o FastMCP (mcp 1.x) + httpx puro.
 
 v1.2.0:
   - Herramientas nuevas: replies, favoriters, retweeters, user likes, bookmarks,
     home timeline, trending topics, validación de cookies, bookmark/unbookmark.
   - Mejor manejo de errores (ForbiddenError).
+
+v1.5.0:
+  - Compatible con mcp 2.x (MCPServer) y mcp 1.x (FastMCP).
 """
 
 from __future__ import annotations
@@ -20,7 +23,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from mcp.server.fastmcp import FastMCP
+try:
+    # mcp >= 2
+    from mcp.server.mcpserver import MCPServer as _MCPServer
+except ImportError:  # pragma: no cover - compat mcp 1.x
+    from mcp.server.fastmcp import FastMCP as _MCPServer
 
 from .actions import (
     bulk_unfollow,
@@ -65,7 +72,7 @@ from .scrapers import (
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-mcp = FastMCP(
+mcp = _MCPServer(
     "xactions-py",
     instructions="X/Twitter automation toolkit — Python port of XActions. Sin npm.",
 )
