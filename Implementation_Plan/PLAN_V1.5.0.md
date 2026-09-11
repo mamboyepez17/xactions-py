@@ -285,13 +285,13 @@ from xactions.cli import cli
 
 - [x] B0 baseline limpio
 - [x] B1 packaging instalable
-- [ ] B2 GraphQL resiliente
-- [ ] B3 cookies seguras (UX + logs)
-- [ ] B4 rate-limit + paginación
-- [ ] B5 features (5A–5C al menos)
-- [ ] B6 docs + push + TrendScope
-- [ ] `main` publicada y sincronizada
-- [ ] TrendScope documentado
+- [x] B2 GraphQL resiliente (+ B2.1 multi-fuente)
+- [x] B3 cookies seguras (UX + logs)
+- [x] B4 rate-limit + paginación
+- [x] B5 features (5A–5C; watch → v1.6)
+- [x] B6 docs + push + TrendScope
+- [x] `main` publicada y sincronizada
+- [x] TrendScope documentado
 
 ---
 

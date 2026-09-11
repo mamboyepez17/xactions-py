@@ -7,7 +7,7 @@ No npm. No Puppeteer. Just `httpx` + Twitter/X internal GraphQL API.
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/deps-3-brightgreen?style=flat-square)
 ![npm free](https://img.shields.io/badge/npm-free-red?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-40%20passing-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-78%20passing-brightgreen?style=flat-square)
 ![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?style=flat-square)
 
 ---
@@ -355,7 +355,7 @@ xactions-py/
 │       ├── cli.py          # CLI (Click) → entry point `xactions`
 │       ├── mcp_server.py   # MCP server (mcp 2.x MCPServer / 1.x FastMCP)
 │       └── py.typed
-├── tests/                  # pytest + respx (40 tests)
+├── tests/                  # pytest + respx (78 tests)
 ├── .github/workflows/
 │   └── ci.yml              # ruff + pytest on 3.10–3.13
 ├── Implementation_Plan/    # plan de trabajo v1.5.0

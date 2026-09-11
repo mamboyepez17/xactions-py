@@ -54,6 +54,13 @@
 
 ### Fixed
 - `bulk_unfollow.on_progress` tipado como `Callable[[int, int, str], None]` (antes `callable`, inválido).
+- `post_tweet` extrae `tweet_id` de más formas de respuesta GraphQL (`rest_id`, `legacy.id_str`, `TweetWithVisibilityResults`).
+- `validate_cookies`: usa GraphQL (`HomeLatestTimeline`) en vez del REST `verify_credentials` deprecado.
+- CLI `post` muestra el mensaje de error de la API (antes solo “No se pudo publicar”).
+- Live test: validate/post/delete OK; hilo limitado por cupo diario de X (error 344), no por bug del cliente.
+
+### Tests
+- **78 passing** (+38 desde v1.4.0): packaging, GraphQL refresh, seguridad, rate-limit, features B5.
 
 ## v1.4.0 — 2026-08-17
 
