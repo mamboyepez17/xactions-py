@@ -621,21 +621,69 @@ class TwitterClient:
 
     async def validate_cookies(self) -> dict[str, Any]:
         """
-        Verifica que las cookies sean válidas haciendo una petición autenticada.
-        Devuelve información básica de la cuenta o lanza AuthError/ForbiddenError.
+        Verifica que las cookies sean válidas con una query GraphQL autenticada
+        (HomeLatestTimeline). El REST verify_credentials de X ya no existe.
+        Devuelve {valid, username?, user_id?} o {valid: False, error}.
         """
         if not self.is_authenticated():
             raise AuthError("Falta auth_token en las cookies")
         try:
-            data = await self.rest_get("/1.1/account/verify_credentials.json", params={"skip_status": "true"})
-            return {
-                "valid": True,
-                "user_id": data.get("id_str"),
-                "username": data.get("screen_name"),
-                "name": data.get("name"),
-            }
-        except (AuthError, ForbiddenError) as e:
+            data = await self.graphql(
+                "HomeLatestTimeline",
+                variables={
+                    "count": 5,
+                    "includePromotedContent": False,
+                    "withCommunity": True,
+                    "latestControlAvailable": True,
+                },
+            )
+        except (AuthError, ForbiddenError, NotFoundError) as e:
             return {"valid": False, "error": str(e)}
+        except TwitterError as e:
+            # 404 de query roto no implica cookies malas; lo tratamos como inválido con detalle
+            return {"valid": False, "error": str(e)}
+
+        if not data or "data" not in data:
+            return {"valid": False, "error": "Respuesta GraphQL vacía o sin data"}
+
+        # Intentar extraer username del home (best-effort)
+        username = None
+        user_id = None
+        try:
+            instructions = (
+                data.get("data", {})
+                .get("home", {})
+                .get("home_timeline_urt", {})
+                .get("instructions", [])
+            )
+            for instruction in instructions:
+                for entry in instruction.get("entries", []):
+                    content = entry.get("content", {})
+                    item = content.get("itemContent") or {}
+                    user_results = (
+                        item.get("tweet_results", {})
+                        .get("result", {})
+                        .get("core", {})
+                        .get("user_results", {})
+                        .get("result", {})
+                    )
+                    if user_results:
+                        legacy = user_results.get("legacy", {})
+                        username = legacy.get("screen_name")
+                        user_id = user_results.get("rest_id")
+                        if username:
+                            break
+                if username:
+                    break
+        except (TypeError, AttributeError):
+            pass
+
+        return {
+            "valid": True,
+            "user_id": user_id,
+            "username": username,
+            "via": "HomeLatestTimeline",
+        }
 
     # ─── GraphQL query ID refresh (con cookies de esta sesión) ─────────────────
 

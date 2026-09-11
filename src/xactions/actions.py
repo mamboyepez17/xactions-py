@@ -72,7 +72,30 @@ async def post_tweet(
             .get("tweet_results", {})
             .get("result", {})
     )
-    return {"success": bool(result), "tweet_id": result.get("rest_id")}
+    # TweetWithVisibilityResults anida el tweet real en .tweet
+    if isinstance(result, dict) and result.get("__typename") == "TweetWithVisibilityResults":
+        result = result.get("tweet") or {}
+
+    tweet_id = None
+    if isinstance(result, dict):
+        tweet_id = (
+            result.get("rest_id")
+            or (result.get("legacy") or {}).get("id_str")
+            or (result.get("tweet") or {}).get("rest_id")
+        )
+
+    # Errores GraphQL dentro del payload (sin HTTP error)
+    errors = data.get("errors") or []
+    error_msg = None
+    if errors:
+        error_msg = errors[0].get("message") if isinstance(errors[0], dict) else str(errors[0])
+
+    return {
+        "success": bool(tweet_id),
+        "tweet_id": tweet_id,
+        "error": error_msg,
+        "raw_keys": list(data.keys()) if not tweet_id else None,
+    }
 
 
 async def post_thread(
@@ -100,7 +123,10 @@ async def post_thread(
                 "success": False,
                 "tweet_ids": tweet_ids,
                 "failed_at": i,
-                "error": f"No se pudo publicar el tweet {i + 1}/{len(tweets)}",
+                "error": (
+                    result.get("error")
+                    or f"No se pudo publicar el tweet {i + 1}/{len(tweets)}"
+                ),
             }
         tweet_ids.append(result["tweet_id"])
         reply_to = result["tweet_id"]

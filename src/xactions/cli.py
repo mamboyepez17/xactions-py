@@ -146,13 +146,22 @@ def with_client(func):
         cookies = kwargs.pop("cookies", "")
         cookies_file = kwargs.pop("cookies_file", None)
         client = get_client(cookies, cookies_file)
+        exit_code = 0
         try:
             return func(client, *args, **kwargs)
+        except SystemExit as e:
+            exit_code = e.code if isinstance(e.code, int) else 1
+            raise
         except Exception as e:
             click.echo(f"❌ {_safe_error_message(e)}", err=True)
-            sys.exit(1)
+            exit_code = 1
         finally:
-            run(client.aclose())
+            try:
+                run(client.aclose())
+            except Exception:
+                pass
+            if exit_code:
+                sys.exit(exit_code)
 
     return wrapper
 
@@ -739,7 +748,7 @@ def post(client, text, reply_to, media_files):
     if result["success"]:
         click.echo(f"✅ Tweet publicado! ID: {result['tweet_id']}")
     else:
-        click.echo("❌ No se pudo publicar.", err=True)
+        click.echo(f"❌ No se pudo publicar. {result.get('error') or ''}", err=True)
         sys.exit(1)
 
 

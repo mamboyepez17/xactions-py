@@ -118,15 +118,56 @@ async def test_network_retry():
 
 
 @respx.mock
-async def test_rest_get_verify_credentials(client):
-    route = respx.get("https://x.com/i/api/1.1/account/verify_credentials.json").mock(
-        return_value=httpx.Response(200, json={"id_str": "42", "screen_name": "test", "name": "Test"})
+async def test_validate_cookies_via_graphql_home(client):
+    from xactions.client import GRAPHQL_ENDPOINTS
+
+    qid = GRAPHQL_ENDPOINTS["HomeLatestTimeline"]["queryId"]
+    respx.post(f"https://x.com/i/api/graphql/{qid}/HomeLatestTimeline").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "home": {
+                        "home_timeline_urt": {
+                            "instructions": [
+                                {
+                                    "type": "TimelineAddEntries",
+                                    "entries": [
+                                        {
+                                            "entryId": "tweet-1",
+                                            "content": {
+                                                "itemContent": {
+                                                    "tweet_results": {
+                                                        "result": {
+                                                            "core": {
+                                                                "user_results": {
+                                                                    "result": {
+                                                                        "rest_id": "42",
+                                                                        "legacy": {
+                                                                            "screen_name": "test"
+                                                                        },
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                        }
+                                    ],
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+        )
     )
 
     result = await client.validate_cookies()
     assert result["valid"] is True
     assert result["username"] == "test"
-    assert route.called
+    assert result["user_id"] == "42"
 
 
 async def test_parse_cookies_url_encoding():
