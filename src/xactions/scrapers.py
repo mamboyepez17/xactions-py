@@ -26,6 +26,14 @@ from .client import (
 
 _log = logging.getLogger(__name__)
 
+# Tamaños de página GraphQL (X acepta más de 20 en varios endpoints;
+# search suele seguir capado a 20).
+PAGE_SIZE_USERS = 100       # Followers / Following
+PAGE_SIZE_ENGAGEMENT = 50   # Favoriters / Retweeters
+PAGE_SIZE_TWEETS = 40       # UserTweets / replies / likes / home
+PAGE_SIZE_BOOKMARKS = 40
+PAGE_SIZE_SEARCH = 20       # SearchTimeline: la API limita a ~20
+
 # ─── Cache de user_id (evita lookups repetidos de perfil) ─────────────────────
 
 _USER_ID_CACHE: dict[str, str] = {}
@@ -293,7 +301,7 @@ async def _paginate_users(
     while len(all_users) < limit:
         variables: dict[str, Any] = {
             "userId": user_id,
-            "count": min(20, limit - len(all_users)),
+            "count": min(PAGE_SIZE_USERS, limit - len(all_users)),
             "includePromotedContent": False,
         }
         if cursor:
@@ -377,7 +385,7 @@ async def scrape_tweets(
     while len(all_tweets) < limit:
         variables: dict[str, Any] = {
             "userId": user_id,
-            "count": min(40, limit - len(all_tweets)),
+            "count": min(PAGE_SIZE_TWEETS, limit - len(all_tweets)),
             "includePromotedContent": False,
             "withQuickPromoteEligibilityTweetFields": True,
             "withVoice": True,
@@ -420,7 +428,7 @@ async def get_user_likes(
     while len(all_tweets) < limit:
         variables: dict[str, Any] = {
             "userId": user_id,
-            "count": min(40, limit - len(all_tweets)),
+            "count": min(PAGE_SIZE_TWEETS, limit - len(all_tweets)),
             "includePromotedContent": False,
             "withClientEventToken": False,
             "withBirdwatchNotes": True,
@@ -521,7 +529,7 @@ async def get_tweet_favoriters(
     while len(all_users) < limit:
         variables: dict[str, Any] = {
             "tweetId": tweet_id,
-            "count": min(20, limit - len(all_users)),
+            "count": min(PAGE_SIZE_ENGAGEMENT, limit - len(all_users)),
             "includePromotedContent": False,
         }
         if cursor:
@@ -556,7 +564,7 @@ async def get_tweet_retweeters(
     while len(all_users) < limit:
         variables: dict[str, Any] = {
             "tweetId": tweet_id,
-            "count": min(20, limit - len(all_users)),
+            "count": min(PAGE_SIZE_ENGAGEMENT, limit - len(all_users)),
             "includePromotedContent": False,
         }
         if cursor:
@@ -594,7 +602,7 @@ async def get_bookmarks(
 
     while len(all_tweets) < limit:
         variables: dict[str, Any] = {
-            "count": min(20, limit - len(all_tweets)),
+            "count": min(PAGE_SIZE_BOOKMARKS, limit - len(all_tweets)),
             "includePromotedContent": False,
         }
         if cursor:
@@ -641,7 +649,7 @@ async def get_home_timeline(
 
     while len(all_tweets) < limit:
         variables: dict[str, Any] = {
-            "count": min(20, limit - len(all_tweets)),
+            "count": min(PAGE_SIZE_TWEETS, limit - len(all_tweets)),
             "includePromotedContent": True,
             "latestControlAvailable": True,
             "requestContext": "launch",
@@ -710,7 +718,7 @@ async def search_tweets(
     while len(all_tweets) < limit:
         variables: dict[str, Any] = {
             "rawQuery": query,
-            "count": min(20, limit - len(all_tweets)),
+            "count": min(PAGE_SIZE_SEARCH, limit - len(all_tweets)),
             "querySource": "typed_query",
             "product": mode,
         }

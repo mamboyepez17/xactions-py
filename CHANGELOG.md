@@ -13,6 +13,12 @@
 - El cliente reintenta una vez si un endpoint devuelve 404 / “Query does not exist” (pasando sus cookies al refresh).
 - Env `XACTIONS_NO_GQL_REFRESH=1` para tests/CI sin red.
 
+### Added (B4 rate-limit + paginación)
+- **Throttle proactivo**: el client guarda `x-rate-limit-remaining` / `x-rate-limit-reset` por endpoint y espera *antes* del request si remaining=0 (en vez de solo reaccionar al 429).
+- **`max_rate_limit_wait`** configurable en `TwitterClient` (default 60s); el wait del 429 también se capa con ese valor.
+- `client.rate_limit_status()` para inspección.
+- **Páginas más grandes**: Followers/Following 100, engagement 50, tweets/home 40 (search sigue en 20 por límite de la API).
+
 ### Added (B3 seguridad cookies)
 - Módulo `xactions/security.py`: `redact_cookies` / `redact_in_text` (nunca imprime valores).
 - CLI: warning no bloqueante si pasas cookies con `--cookies` (historial del shell).

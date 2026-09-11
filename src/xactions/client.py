@@ -205,6 +205,7 @@ class TwitterClient:
         max_retries: int = 3,
         timeout: float = 30.0,
         user_agent: str | None = None,
+        max_rate_limit_wait: float = 60.0,
     ):
         self._cookie_str = cookies or ""
         self._cookies: dict[str, str] = {}
@@ -217,6 +218,9 @@ class TwitterClient:
         self._closed = False
         self._last_rate_limit_reset: int | None = None
         self._client_uuid = str(uuid.uuid4())
+        # Seguimiento proactivo de rate limits por path (x-rate-limit-*)
+        self._max_rate_limit_wait = max(0.0, max_rate_limit_wait)
+        self._rate_limits: dict[str, dict[str, Any]] = {}
 
         if cookies:
             self._parse_cookies(cookies)
@@ -315,6 +319,66 @@ class TwitterClient:
 
     # ─── Requests ────────────────────────────────────────────────────────────────
 
+    def _rate_limit_key(self, url: str) -> str:
+        """Clave estable por recurso GraphQL/REST (sin query string ni queryId)."""
+        path = url.split("?", 1)[0].rstrip("/")
+        parts = [p for p in path.split("/") if p]
+        if "graphql" in parts:
+            gi = parts.index("graphql")
+            # .../graphql/<queryId>/<Operation>
+            if len(parts) > gi + 2:
+                return f"graphql/{parts[gi + 2]}"
+        return "/".join(parts[-2:]) if len(parts) >= 2 else path
+
+    def _record_rate_limit(self, url: str, response: httpx.Response) -> None:
+        """Guarda remaining/reset de la respuesta para throttle proactivo."""
+        remaining = response.headers.get("x-rate-limit-remaining")
+        reset = response.headers.get("x-rate-limit-reset")
+        if remaining is None and reset is None:
+            return
+        key = self._rate_limit_key(url)
+        entry: dict[str, Any] = {"updated_at": time.time()}
+        try:
+            if remaining is not None:
+                entry["remaining"] = int(remaining)
+            if reset is not None:
+                entry["reset"] = int(reset)
+                self._last_rate_limit_reset = int(reset)
+        except (ValueError, TypeError):
+            return
+        self._rate_limits[key] = entry
+
+    def rate_limit_status(self) -> dict[str, dict[str, Any]]:
+        """Snapshot de rate limits conocidos (para CLI/tests)."""
+        return {k: dict(v) for k, v in self._rate_limits.items()}
+
+    async def _maybe_throttle(self, url: str) -> None:
+        """
+        Si remaining=0 y el reset está en el futuro, espera ANTES del request
+        (evita pegar 429 cuando ya sabemos que se agotó).
+        """
+        key = self._rate_limit_key(url)
+        entry = self._rate_limits.get(key)
+        if not entry:
+            return
+        remaining = entry.get("remaining")
+        reset = entry.get("reset")
+        if remaining is None or remaining > 0 or reset is None:
+            return
+        wait = float(reset) - time.time()
+        if wait <= 0:
+            return
+        # Cap configurable; si el reset está lejos, no bloqueamos el proceso entero
+        wait = min(wait, self._max_rate_limit_wait)
+        if wait <= 0:
+            return
+        _log.warning(
+            "Rate limit agotado en %s (remaining=0). Espera proactiva %.1fs",
+            key,
+            wait,
+        )
+        await asyncio.sleep(wait)
+
     def _retry_delay(self, attempt: int, response: httpx.Response | None = None) -> float:
         """Calcula segundos de espera antes de reintentar."""
         if response is not None and response.status_code == 429:
@@ -324,9 +388,7 @@ class TwitterClient:
                 try:
                     wait = max(0.0, float(reset_ts) - time.time())
                     self._last_rate_limit_reset = int(reset_ts)
-                    # Cap a 30s para evitar esperas absurdas cuando el header
-                    # viene mal o muy lejano (también útil en tests).
-                    wait = min(wait, 30.0)
+                    wait = min(wait, self._max_rate_limit_wait)
                     _log.warning("Rate limit. Esperando %.1fs (reset=%s)", wait, reset_ts)
                     return wait
                 except (ValueError, TypeError):
@@ -334,7 +396,7 @@ class TwitterClient:
             retry_after = response.headers.get("retry-after")
             if retry_after:
                 try:
-                    return float(retry_after)
+                    return min(float(retry_after), self._max_rate_limit_wait)
                 except (ValueError, TypeError):
                     pass
         return min(2.0 ** attempt, 30.0)
@@ -358,6 +420,9 @@ class TwitterClient:
 
         for attempt in range(max_attempts):
             try:
+                # Throttle proactivo si este endpoint ya se agotó
+                await self._maybe_throttle(url)
+
                 if method.upper() == "GET":
                     resp = await self._http.get(url, headers=request_headers, params=params)
                 elif json_payload is not None:
@@ -366,6 +431,8 @@ class TwitterClient:
                     resp = await self._http.post(url, headers=request_headers, data=data_payload)
                 else:
                     resp = await self._http.post(url, headers=request_headers)
+
+                self._record_rate_limit(url, resp)
 
                 # Twitter rota el CSRF token en sesiones largas: si la respuesta
                 # trae un ct0 nuevo, lo adoptamos para las próximas peticiones.
