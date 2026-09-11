@@ -73,11 +73,11 @@ B1 es el cuello de botella: hasta que el paquete no esté limpio, todo lo demás
 | 0.5 | Commit | `chore: v1.5.0 baseline — LICENSE, py.typed, typing` |
 
 ### Criterios de aceptación
-- [ ] `LICENSE` existe y dice MIT
-- [ ] `py.typed` presente
-- [ ] `pytest` 40+ passed
-- [ ] `ruff check` OK
-- [ ] Sin cambios de comportamiento en CLI/API
+- [x] `LICENSE` existe y dice MIT
+- [x] `py.typed` presente
+- [x] `pytest` 40+ passed
+- [x] `ruff check` OK
+- [x] Sin cambios de comportamiento en CLI/API
 
 ---
 
@@ -137,12 +137,12 @@ from xactions.cli import cli
 - CLI (`xactions ...`) y MCP se mantienen igual en UX.
 
 ### Criterios de aceptación
-- [ ] `pip install -e ".[dev,mcp]"` limpia
-- [ ] `python -c "from xactions import TwitterClient"` funciona
-- [ ] `xactions --help` funciona
-- [ ] `python -m xactions.mcp_server` importable
-- [ ] Tests en verde (imports actualizados)
-- [ ] Cero `sys.path.insert` en el código fuente
+- [x] `pip install -e ".[dev,mcp]"` limpia
+- [x] `python -c "from xactions import TwitterClient"` funciona
+- [x] `xactions --help` funciona
+- [x] `python -m xactions.mcp_server` importable (requiere extra `mcp`)
+- [x] Tests en verde (imports actualizados)
+- [x] Cero `sys.path.insert` en el código fuente
 
 ---
 
@@ -282,8 +282,8 @@ from xactions.cli import cli
 
 ## Checklist final del plan
 
-- [ ] B0 baseline limpio
-- [ ] B1 packaging instalable
+- [x] B0 baseline limpio
+- [x] B1 packaging instalable
 - [ ] B2 GraphQL resiliente
 - [ ] B3 cookies seguras (UX + logs)
 - [ ] B4 rate-limit + paginación
