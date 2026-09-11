@@ -1033,6 +1033,41 @@ def validate(client):
         sys.exit(1)
 
 
+@cli.command()
+@click.argument("query")
+@click.option("--limit", "-l", default=20, show_default=True)
+@click.option("--mode", default="Latest", type=click.Choice(["Latest", "Top"]))
+@click.option("--loop", "loop_interval", type=float, default=0, help="Seconds between polls (0 = once)")
+@click.option("--max-polls", type=int, default=0, help="Stop after N polls when --loop > 0 (0 = forever)")
+@common_options
+@with_client
+def watch(client, query, limit, mode, loop_interval, max_polls, output, csv_path, ndjson_path, table):
+    """Poll a search and print only new tweets (delta)."""
+    from .watch import watch_search_once
+
+    polls = 0
+    while True:
+        result = run(watch_search_once(client, query, limit=limit, mode=mode))
+        polls += 1
+        new = result["new_tweets"]
+        if new:
+            _handle_output(
+                {"query": query, "new_count": result["new_count"], "tweets": new},
+                output, csv_path, ndjson_path,
+                csv_data=_flatten_tweets(new),
+                table_fn=print_tweets_table if table else None,
+                table_title=f"New for “{query}”",
+            )
+        else:
+            click.echo(f"… no new tweets for “{query}” (poll {polls})")
+        if loop_interval <= 0:
+            break
+        if max_polls and polls >= max_polls:
+            break
+        import time as _time
+        _time.sleep(loop_interval)
+
+
 # ─── GraphQL endpoints ────────────────────────────────────────────────────────
 
 @cli.command("gql-status")
