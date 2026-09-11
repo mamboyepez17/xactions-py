@@ -95,12 +95,24 @@ except PackageNotFoundError:
     __version__ = "1.5.0"
 
 
-def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
+def _load_cookies_list(cookies: str, cookies_file: str | None, from_browser: str | None = None) -> list[str]:
     """
     Devuelve la lista de strings de cookies disponibles.
-    - --cookies-file: una cookie por línea (líneas vacías y # ignoradas).
-    - --cookies / TWITTER_COOKIES: una sola cookie, o varias separadas por '|||'.
+    - --from-browser: lee auth_token/ct0 del navegador instalado
+    - --cookies-file: soporta cookie-string, Netscape, Cookie-Editor JSON, Playwright
+    - --cookies / TWITTER_COOKIES: una sola cookie, o varias separadas por '|||'
     """
+    from .browser_cookies import import_from_browser, load_cookies_from_file
+
+    if from_browser:
+        imported = import_from_browser(from_browser)
+        if not imported:
+            raise click.ClickException(
+                f"No se pudieron importar cookies desde {from_browser}. "
+                "Exporta con Cookie-Editor y usa --cookies-file."
+            )
+        return [imported]
+
     raw: list[str] = []
     if cookies_file:
         if not os.path.exists(cookies_file):
@@ -108,8 +120,11 @@ def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
         perm_warn = check_cookies_file_permissions(cookies_file)
         if perm_warn:
             click.echo(f"⚠️  {perm_warn}", err=True)
-        with open(cookies_file, encoding="utf-8") as f:
-            raw = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+        raw = load_cookies_from_file(cookies_file)
+        if not raw:
+            # fallback simple lines
+            with open(cookies_file, encoding="utf-8") as f:
+                raw = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
     else:
         value = cookies or os.getenv(COOKIES_ENV, "")
         if value:
@@ -117,9 +132,13 @@ def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
     return raw
 
 
-def get_client(cookies: str = "", cookies_file: str | None = None) -> AnyClient:
+def get_client(
+    cookies: str = "",
+    cookies_file: str | None = None,
+    from_browser: str | None = None,
+) -> AnyClient:
     """Devuelve un TwitterClient (1 cookie) o un ClientPool (varias)."""
-    cookie_list = _load_cookies_list(cookies, cookies_file)
+    cookie_list = _load_cookies_list(cookies, cookies_file, from_browser=from_browser)
     cli_warn = warn_cli_cookies(cookies)
     if cli_warn:
         click.echo(f"⚠️  {cli_warn}", err=True)
@@ -145,7 +164,8 @@ def with_client(func):
     def wrapper(*args, **kwargs):
         cookies = kwargs.pop("cookies", "")
         cookies_file = kwargs.pop("cookies_file", None)
-        client = get_client(cookies, cookies_file)
+        from_browser = kwargs.pop("from_browser", None)
+        client = get_client(cookies, cookies_file, from_browser=from_browser)
         exit_code = 0
         try:
             return func(client, *args, **kwargs)
@@ -343,7 +363,13 @@ def common_options(fn):
         help="Cookies de sesión (preferir .env TWITTER_COOKIES o --cookies-file)",
     )(fn)
     fn = click.option("--cookies-file", type=click.Path(exists=True), default=None,
-                      help="Archivo con cookies (una por línea = pool multi-cuenta)")(fn)
+                      help="Cookie file (line format, Netscape, Cookie-Editor JSON)")(fn)
+    fn = click.option(
+        "--from-browser",
+        type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]),
+        default=None,
+        help="Import auth_token/ct0 from an installed browser profile",
+    )(fn)
     fn = click.option("--output", "-o", default=None, help="Archivo JSON de salida")(fn)
     fn = click.option("--csv", "csv_path", default=None, help="Archivo CSV de salida")(fn)
     fn = click.option("--ndjson", "ndjson_path", default=None, help="Archivo NDJSON de salida")(fn)
@@ -735,6 +761,16 @@ def history(username, limit, db_path, output):
 @with_client
 def post(client, text, reply_to, media_files):
     """Publica un tweet. Requiere auth_token."""
+    from .drafts import approval_required, create_draft
+
+    if approval_required() and not media_files:
+        draft = create_draft(
+            "post_tweet",
+            {"text": text, "reply_to_id": reply_to},
+        )
+        click.echo(f"📝 Draft saved (approval required): {draft['id']}")
+        click.echo("   Review: xactions drafts list → xactions drafts approve <id>")
+        return
 
     async def _post():
         media_ids = []
@@ -859,6 +895,12 @@ def delete(client, tweet_id):
 @with_client
 def like(client, tweet_id):
     """Da like a un tweet. Requiere auth_token."""
+    from .drafts import approval_required, create_draft
+
+    if approval_required():
+        draft = create_draft("like", {"tweet_id": tweet_id})
+        click.echo(f"📝 Draft saved: {draft['id']} — approve with: xactions drafts approve {draft['id']}")
+        return
     result = run(like_tweet(client, tweet_id))
     click.echo("✅ Like dado." if result["success"] else "❌ Error dando like.")
 
@@ -991,6 +1033,126 @@ def validate(client):
         sys.exit(1)
 
 
+@cli.command()
+@click.argument("query")
+@click.option("--limit", "-l", default=20, show_default=True)
+@click.option("--mode", default="Latest", type=click.Choice(["Latest", "Top"]))
+@click.option("--loop", "loop_interval", type=float, default=0, help="Seconds between polls (0 = once)")
+@click.option("--max-polls", type=int, default=0, help="Stop after N polls when --loop > 0 (0 = forever)")
+@common_options
+@with_client
+def watch(client, query, limit, mode, loop_interval, max_polls, output, csv_path, ndjson_path, table):
+    """Poll a search and print only new tweets (delta)."""
+    from .watch import watch_search_once
+
+    polls = 0
+    while True:
+        result = run(watch_search_once(client, query, limit=limit, mode=mode))
+        polls += 1
+        new = result["new_tweets"]
+        if new:
+            _handle_output(
+                {"query": query, "new_count": result["new_count"], "tweets": new},
+                output, csv_path, ndjson_path,
+                csv_data=_flatten_tweets(new),
+                table_fn=print_tweets_table if table else None,
+                table_title=f"New for “{query}”",
+            )
+        else:
+            click.echo(f"… no new tweets for “{query}” (poll {polls})")
+        if loop_interval <= 0:
+            break
+        if max_polls and polls >= max_polls:
+            break
+        import time as _time
+        _time.sleep(loop_interval)
+
+
+@cli.command("download-media")
+@click.argument("username")
+@click.option("--limit", "-l", default=30, show_default=True, help="Tweets to scan for media")
+@click.option("--dest", default="media", show_default=True, help="Output directory")
+@click.option("--max-files", default=50, show_default=True)
+@common_options
+@with_client
+def download_media_cmd(client, username, limit, dest, max_files, output, csv_path, ndjson_path, table):
+    """Download photos/videos from a user's recent tweets."""
+    from .media import collect_media_urls, download_media
+
+    tweets = run(scrape_tweets(client, username, limit=limit))
+    urls = collect_media_urls(tweets)
+    result = run(download_media(urls, dest, max_files=max_files))
+    result["media_found"] = len(urls)
+    if output:
+        print_json(result, output)
+        return
+    click.echo(
+        f"📁 {len(result['downloaded'])} downloaded, "
+        f"{len(result['skipped'])} skipped, {len(result['failed'])} failed → {result['dest']}"
+    )
+
+
+@cli.command("snapshot-followers")
+@click.argument("username")
+@click.option("--limit", "-l", default=200, show_default=True)
+@click.option("--cookies", envvar=COOKIES_ENV, default="")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None)
+@click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
+@with_client
+def snapshot_followers(client, username, limit):
+    """Save a follower snapshot for later unfollower diff."""
+    from .media import save_follower_snapshot
+
+    followers = run(scrape_followers(client, username, limit=limit))
+    ids = [str(u["id"]) for u in followers if u.get("id")]
+    save_follower_snapshot(username, ids)
+    click.echo(f"💾 Saved {len(ids)} followers for @{username}")
+
+
+@cli.command("unfollowers")
+@click.argument("username")
+@click.option("--limit", "-l", default=200, show_default=True)
+@click.option("--save", "do_save", is_flag=True, help="Also save this run as new snapshot")
+@click.option("--output", "-o", default=None)
+@click.option("--cookies", envvar=COOKIES_ENV, default="")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None)
+@click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
+@with_client
+def unfollowers_cmd(client, username, limit, do_save, output):
+    """Diff current followers vs last snapshot (who unfollowed)."""
+    from .media import diff_followers, load_follower_snapshot, save_follower_snapshot
+
+    prev = load_follower_snapshot(username)
+    if prev is None:
+        raise click.ClickException(
+            f"No snapshot for @{username}. Run: xactions snapshot-followers {username}"
+        )
+    followers = run(scrape_followers(client, username, limit=limit))
+    ids = [str(u["id"]) for u in followers if u.get("id")]
+    diff = diff_followers(prev, ids)
+    report = {
+        "username": username,
+        "previous_count": len(prev),
+        "current_count": len(ids),
+        "unfollowed_count": len(diff["unfollowed"]),
+        "new_followers_count": len(diff["new_followers"]),
+        **diff,
+    }
+    if do_save:
+        save_follower_snapshot(username, ids)
+    if output:
+        print_json(report, output)
+        return
+    click.echo(
+        f"📉 @{username}: {report['unfollowed_count']} unfollowed, "
+        f"{report['new_followers_count']} new (prev {report['previous_count']} → now {report['current_count']})"
+    )
+    for uid in diff["unfollowed"][:20]:
+        click.echo(f"  - {uid}")
+    if report["unfollowed_count"] > 20:
+        click.echo(f"  … and {report['unfollowed_count'] - 20} more")
+
+
 # ─── GraphQL endpoints ────────────────────────────────────────────────────────
 
 @cli.command("gql-status")
@@ -1063,6 +1225,133 @@ def gql_refresh_cmd(cookies, cookies_file, output):
     if len(changed) > 8:
         click.echo(f"  … y {len(changed) - 8} más")
     click.echo("")
+
+
+@cli.command()
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+@click.option("--json", "as_json", is_flag=True, help="Imprimir JSON en stdout")
+def doctor(cookies, cookies_file, output, as_json):
+    """Check local setup: cookies, GraphQL cache, write caps, DB."""
+    from .doctor import run_doctor
+
+    report = run_doctor(cookies=cookies or None, cookies_file=cookies_file)
+    if output:
+        print_json(report, output)
+        return
+    if as_json:
+        click.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        if not report["ok"]:
+            sys.exit(1)
+        return
+
+    icon = {"ok": "✅", "warn": "⚠️ ", "error": "❌"}
+    click.echo(f"\n{'─'*55}")
+    click.echo(f"  🩺 xactions doctor — {report['summary']}")
+    click.echo(f"{'─'*55}")
+    for c in report["checks"]:
+        click.echo(f"  {icon.get(c['status'], '•')} {c['check']:<14} {c['message']}")
+    click.echo(f"{'─'*55}\n")
+    if not report["ok"]:
+        sys.exit(1)
+
+
+@cli.group()
+def drafts():
+    """Review and release write drafts (approval gate)."""
+    pass
+
+
+@drafts.command("list")
+@click.option("--all", "show_all", is_flag=True, help="Include executed/discarded")
+@click.option("--output", "-o", default=None, help="JSON output file")
+def drafts_list(show_all, output):
+    from .drafts import list_drafts
+
+    items = list_drafts(status=None if show_all else "pending")
+    if output:
+        print_json({"count": len(items), "drafts": items}, output)
+        return
+    if not items:
+        click.echo("No pending drafts.")
+        return
+    click.echo(f"\n{'─'*55}\n  📝 {len(items)} draft(s)\n{'─'*55}")
+    for d in items:
+        params = json.dumps(d.get("params"), ensure_ascii=False)
+        if len(params) > 60:
+            params = params[:57] + "..."
+        click.echo(f"  {d['id']}  [{d.get('status')}]  {d.get('action')}  {params}")
+    click.echo(f"{'─'*55}\n")
+
+
+@drafts.command("approve")
+@click.argument("draft_id")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None)
+@click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
+def drafts_approve(draft_id, cookies, cookies_file, from_browser):
+    """Mark draft approved and execute it now."""
+    from .actions import (
+        create_bookmark,
+        delete_tweet,
+        follow_user,
+        like_tweet,
+        post_tweet,
+        unfollow_user,
+        unlike_tweet,
+    )
+    from .drafts import approve as approve_draft
+    from .drafts import load_draft, mark_executed
+
+    draft = load_draft(draft_id)
+    if not draft:
+        raise click.ClickException(f"Draft not found: {draft_id}")
+    if draft.get("status") != "pending":
+        raise click.ClickException(f"Draft {draft_id} is {draft.get('status')}, not pending")
+
+    approve_draft(draft_id)
+    action = draft.get("action")
+    params = draft.get("params") or {}
+    client = get_client(cookies, cookies_file, from_browser=from_browser)
+    try:
+        if action == "post_tweet":
+            result = run(post_tweet(client, **params))
+        elif action == "like":
+            result = run(like_tweet(client, **params))
+        elif action == "unlike":
+            result = run(unlike_tweet(client, **params))
+        elif action == "delete":
+            result = run(delete_tweet(client, **params))
+        elif action == "follow":
+            user_id = params.get("user_id") or run(get_user_id(client, params["username"]))
+            result = run(follow_user(client, user_id))
+        elif action == "unfollow":
+            user_id = params.get("user_id") or run(get_user_id(client, params["username"]))
+            result = run(unfollow_user(client, user_id))
+        elif action == "bookmark":
+            result = run(create_bookmark(client, **params))
+        else:
+            raise click.ClickException(f"Unknown draft action: {action}")
+        mark_executed(draft_id, result)
+        if result.get("success"):
+            click.echo(f"✅ Draft {draft_id} executed ({action}).")
+        else:
+            click.echo(f"❌ Draft {draft_id} failed: {result}", err=True)
+            sys.exit(1)
+    finally:
+        run(client.aclose())
+
+
+@drafts.command("discard")
+@click.argument("draft_id")
+def drafts_discard(draft_id):
+    from .drafts import discard
+
+    d = discard(draft_id)
+    if not d:
+        raise click.ClickException(f"Draft not found: {draft_id}")
+    click.echo(f"🗑️  Draft {draft_id} discarded.")
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

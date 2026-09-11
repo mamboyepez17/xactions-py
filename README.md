@@ -7,7 +7,7 @@ No npm. No Puppeteer. Just `httpx` + Twitter/X internal GraphQL API.
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/deps-3-brightgreen?style=flat-square)
 ![npm free](https://img.shields.io/badge/npm-free-red?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-78%20passing-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-122%20passing-brightgreen?style=flat-square)
 ![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?style=flat-square)
 
 ---
@@ -26,6 +26,16 @@ The original XActions is great but depends on npm, which has been the target of 
 | CLI | ✅ | ✅ |
 
 ---
+
+## What's new in v1.6.0
+
+- **🩺 `xactions doctor`** — local health check (cookies, GraphQL cache, caps, DB)
+- **🛑 Daily write caps** — on-disk 24h budget so writes stop *before* X's wall
+- **🌐 `--from-browser`** — import cookies from Chrome/Firefox/Edge (plus Netscape / Cookie-Editor / Playwright files)
+- **📝 Drafts + approval** — `XACTIONS_REQUIRE_APPROVAL=1` + `xactions drafts …`
+- **✍️ Stronger `x-client-transaction-id`** — bound to method/path (not bare uuid)
+- **👀 `xactions watch`** — search deltas; scrape cursor checkpoints for long follower runs
+- **⬇️ `download-media`**, **`snapshot-followers` / `unfollowers`**
 
 ## What's new in v1.5.0
 

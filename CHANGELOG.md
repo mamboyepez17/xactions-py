@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.6.0 — 2026-09-10
+
+### Added
+- **`xactions doctor`**: health checks (python, cookies, GraphQL cache, write caps, SQLite, proxy).
+- **Daily write caps** (`~/.xactions/write_caps.json`): rolling 24h budget per account/operation; `post`/`like`/`follow`/`unfollow` refuse over-budget writes (`WriteCapExceeded`). Env override via limits JSON.
+- **`--from-browser`**: import `auth_token`/`ct0` from Chrome/Chromium/Brave/Edge/Firefox profiles (Windows DPAPI via ctypes; encrypted leftovers fall back to Cookie-Editor export).
+- **Multi-format `--cookies-file`**: Netscape `cookies.txt`, Cookie-Editor JSON, Playwright `storageState`, one cookie-string per line.
+- **Write drafts + approval**: `XACTIONS_REQUIRE_APPROVAL=1` holds `post`/`like` as drafts; `xactions drafts list|approve|discard`; MCP `x_list_drafts` / `x_approve_draft` / `x_discard_draft`.
+- **Payload-bound `x-client-transaction-id`** (SHA-256 + random, method/path bound). `XACTIONS_TXID_MODE=uuid` restores v1.5 behaviour.
+- **`xactions watch`**: poll a search and print only new tweets (delta state under `~/.xactions/state/`).
+- **Scrape checkpoints**: `scrape_followers`/`scrape_following` accept `checkpoint=True` to resume from last cursor.
+- **`xactions download-media`**: download photos/videos from recent tweets.
+- **`xactions snapshot-followers` / `xactions unfollowers`**: follower snapshot + unfollower diff.
+
+### Tests
+- **122 passing** (+44 since v1.5.0).
+
 ## v1.5.0 — 2026-08-17
 
 ### Added — GraphQL resilience
