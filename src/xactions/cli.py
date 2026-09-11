@@ -1065,6 +1065,36 @@ def gql_refresh_cmd(cookies, cookies_file, output):
     click.echo("")
 
 
+@cli.command()
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+@click.option("--json", "as_json", is_flag=True, help="Imprimir JSON en stdout")
+def doctor(cookies, cookies_file, output, as_json):
+    """Check local setup: cookies, GraphQL cache, write caps, DB."""
+    from .doctor import run_doctor
+
+    report = run_doctor(cookies=cookies or None, cookies_file=cookies_file)
+    if output:
+        print_json(report, output)
+        return
+    if as_json:
+        click.echo(json.dumps(report, ensure_ascii=False, indent=2))
+        if not report["ok"]:
+            sys.exit(1)
+        return
+
+    icon = {"ok": "✅", "warn": "⚠️ ", "error": "❌"}
+    click.echo(f"\n{'─'*55}")
+    click.echo(f"  🩺 xactions doctor — {report['summary']}")
+    click.echo(f"{'─'*55}")
+    for c in report["checks"]:
+        click.echo(f"  {icon.get(c['status'], '•')} {c['check']:<14} {c['message']}")
+    click.echo(f"{'─'*55}\n")
+    if not report["ok"]:
+        sys.exit(1)
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
