@@ -27,6 +27,9 @@ xactions = "cli.xactions:cli"
 where = ["."]
 include = ["src*", "cli*"]
 
+[tool.setuptools.package-data]
+"*" = ["py.typed"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

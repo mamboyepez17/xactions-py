@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import sys
+from collections.abc import Callable
 from typing import Any
 
 # Permitir importaciones absolutas desde src/ cuando se ejecuta el CLI/scripts.
@@ -181,11 +182,11 @@ async def bulk_unfollow(
     client: TwitterClient,
     user_ids: list,
     delay_seconds: float = 2.0,
-    on_progress: callable | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     """
     Hace unfollow masivo con delay entre cada acción para evitar rate limits.
-    on_progress: callable(current, total, username) opcional.
+    on_progress: callback(current, total, user_id) opcional.
     """
     _require_auth(client)
     success = 0
