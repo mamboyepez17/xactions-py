@@ -31,8 +31,10 @@ The original XActions is great but depends on npm, which has been the target of 
 
 - **📦 Paquete instalable real**: código en `src/xactions/`, imports `from xactions import ...`, sin `sys.path`
 - **🔑 API pública unificada**: `TwitterClient`, scrapers, actions y wrappers sync desde un solo import
+- **🔄 GraphQL auto-refresh**: si un queryId se rompe, el cliente reintenta tras refrescar IDs desde el bundle de X (fallback twikit) — `xactions gql-status` / `xactions gql-refresh`
 - **📜 LICENSE MIT** y marcador `py.typed` (soporte de tipos estáticos)
 - **🖥️ CLI/MCP**: `xactions ...` y `python -m xactions.mcp_server` (ya no `python cli/xactions.py`)
+- **🤖 MCP 2.x**: compatible con `mcp>=2` (`MCPServer`) y `mcp` 1.x (`FastMCP`)
 
 > **Migración desde ≤1.4.x:** `from src.scraper...` / `from src.actions...` / `from cli.xactions import cli` → `from xactions...` / `from xactions.cli import cli`. El comando instalado sigue siendo `xactions`.
 
@@ -332,6 +334,7 @@ xactions-py/
 │       ├── actions.py      # like, follow, tweet, bookmark, media, bulk_unfollow
 │       ├── analyzer.py     # engagement analytics (pure stdlib)
 │       ├── db.py           # SQLite metric tracking
+│       ├── gql_refresh.py  # auto-refresh de GraphQL query IDs
 │       ├── cli.py          # CLI (Click) → entry point `xactions`
 │       ├── mcp_server.py   # MCP server (mcp 2.x MCPServer / 1.x FastMCP)
 │       └── py.typed
@@ -372,13 +375,14 @@ Twitter's GraphQL API uses **GET** for most read queries but requires **POST** f
 
 ### GraphQL Query IDs
 
-Twitter's internal query IDs change when they deploy new JS bundles. If an endpoint stops working:
+Twitter's internal query IDs change when they deploy new JS bundles. v1.5.0 mitigates this:
 
-1. Fetch `https://x.com` and find the main JS bundle URL
-2. Search for `queryId:"...",operationName:"EndpointName"`
-3. Update `src/xactions/client.py`
+1. **Auto-refresh** — on a stale query (HTTP 404 / “Query does not exist”), the client refreshes IDs once and retries.
+2. **Manual** — `xactions gql-refresh` (or `gql-status` to inspect the cache).
+3. Cache lives at `~/.xactions/gql_endpoints.json`.
+4. Discovery: parse x.com web bundles (responsive-web / x-web), with fallback to [twikit `gql.py`](https://github.com/d60/twikit/blob/main/twikit/client/gql.py).
 
-Or reference [twikit/gql.py](https://github.com/d60/twikit/blob/main/twikit/client/gql.py) which keeps them up to date.
+If an endpoint still fails after refresh, check twikit or update `src/xactions/client.py` defaults.
 
 ---
 

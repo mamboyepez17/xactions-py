@@ -840,6 +840,69 @@ def validate(client):
         sys.exit(1)
 
 
+# ─── GraphQL endpoints ────────────────────────────────────────────────────────
+
+@cli.command("gql-status")
+@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+def gql_status(output):
+    """Muestra el estado del cache de GraphQL query IDs."""
+    from .client import _DEFAULT_GRAPHQL_ENDPOINTS, GRAPHQL_ENDPOINTS
+    from .gql_refresh import cache_status
+
+    status = cache_status()
+    payload = {
+        **status,
+        "loaded": {
+            name: {
+                "queryId": ep.get("queryId"),
+                "operationName": ep.get("operationName"),
+                "method": ep.get("method", "GET"),
+            }
+            for name, ep in sorted(GRAPHQL_ENDPOINTS.items())
+        },
+        "defaults_count": len(_DEFAULT_GRAPHQL_ENDPOINTS),
+    }
+    if output:
+        print_json(payload, output)
+        return
+
+    click.echo(f"\n{'─'*55}")
+    click.echo("  GraphQL query IDs")
+    click.echo(f"{'─'*55}")
+    if status["exists"]:
+        click.echo(f"  Cache:  {status['path']}")
+        click.echo(f"  Update: {status.get('updated_at')}")
+        click.echo(f"  Source: {status.get('source')}")
+    else:
+        click.echo(f"  Cache:  (sin archivo) {status['path']}")
+        click.echo("  Usando solo defaults embebidos")
+    click.echo(f"  Endpoints cargados: {len(GRAPHQL_ENDPOINTS)}")
+    click.echo(f"{'─'*55}\n")
+
+
+@cli.command("gql-refresh")
+@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+def gql_refresh_cmd(output):
+    """Descarga el bundle de x.com y actualiza los GraphQL query IDs."""
+    from .client import refresh_graphql_endpoints
+
+    merged = run(refresh_graphql_endpoints(force=True))
+    changed = {
+        name: ep.get("queryId")
+        for name, ep in sorted(merged.items())
+        if ep.get("queryId")
+    }
+    if output:
+        print_json({"count": len(changed), "endpoints": changed}, output)
+        return
+    click.echo(f"\n✅ GraphQL endpoints actualizados ({len(changed)} con queryId)")
+    for name, qid in list(changed.items())[:8]:
+        click.echo(f"  {name}: {qid}")
+    if len(changed) > 8:
+        click.echo(f"  … y {len(changed) - 8} más")
+    click.echo("")
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

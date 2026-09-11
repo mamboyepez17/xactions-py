@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import time
 import uuid
@@ -23,6 +24,8 @@ from typing import Any
 from urllib.parse import unquote
 
 import httpx
+
+from .gql_refresh import endpoints_with_cache, refresh_endpoints
 
 # ─── Bearer Token público (embebido en el JS bundle de Twitter) ───────────────
 BEARER_TOKEN = (
@@ -42,8 +45,8 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
 ]
 
-# ─── GraphQL endpoints (reverse-engineered, actualizados desde twikit) ─────────
-GRAPHQL_ENDPOINTS: dict[str, dict[str, Any]] = {
+# ─── GraphQL endpoints (defaults; se mezclan con cache ~/.xactions) ───────────
+_DEFAULT_GRAPHQL_ENDPOINTS: dict[str, dict[str, Any]] = {
     "UserByScreenName": {"queryId": "NimuplG1OB7Fd2btCLdBOw", "operationName": "UserByScreenName"},
     "UserByRestId": {"queryId": "tD8zKvQzwY3kdx5yz6YmOw", "operationName": "UserByRestId"},
     "UserTweets": {"queryId": "QWF3SzpHmykQHsQMixG0cg", "operationName": "UserTweets"},
@@ -72,6 +75,15 @@ GRAPHQL_ENDPOINTS: dict[str, dict[str, Any]] = {
     "UnfollowUser": {"queryId": None, "operationName": None},  # REST endpoint
 }
 
+# Store vivo: defaults + cache en disco. Se actualiza con refresh_graphql_endpoints().
+GRAPHQL_ENDPOINTS: dict[str, dict[str, Any]] = endpoints_with_cache(_DEFAULT_GRAPHQL_ENDPOINTS)
+
+# Refresh global (una sola vez por proceso si varios clientes lo piden)
+_gql_refresh_lock: asyncio.Lock | None = None
+_gql_refreshed_this_process = False
+# Tests/CI pueden desactivar el refresh en red: XACTIONS_NO_GQL_REFRESH=1
+_NO_GQL_REFRESH = os.getenv("XACTIONS_NO_GQL_REFRESH", "").strip() in {"1", "true", "yes"}
+
 DEFAULT_FEATURES = {
     "rweb_tipjar_consumption_enabled": True,
     "responsive_web_graphql_exclude_directive_enabled": True,
@@ -98,6 +110,49 @@ DEFAULT_FEATURES = {
 }
 
 _log = logging.getLogger(__name__)
+
+
+def _is_stale_query_error(message: str) -> bool:
+    """Detecta errores típicos de queryId roto/obsoleto."""
+    msg = (message or "").lower()
+    needles = (
+        "query does not exist",
+        "query not found",
+        "no query",
+        "invalid query",
+        "queryid",
+        "operationname",
+        "cannot query field",
+        "document is not defined",
+    )
+    return any(n in msg for n in needles)
+
+
+async def refresh_graphql_endpoints(force: bool = False) -> dict[str, dict[str, Any]]:
+    """
+    Refresca GRAPHQL_ENDPOINTS desde el JS bundle de x.com (una vez por proceso
+    salvo force=True). Actualiza el store global y devuelve los endpoints.
+    """
+    global _gql_refreshed_this_process, _gql_refresh_lock
+    if _NO_GQL_REFRESH:
+        _log.debug("Refresh GraphQL desactivado (XACTIONS_NO_GQL_REFRESH)")
+        return GRAPHQL_ENDPOINTS
+    if _gql_refresh_lock is None:
+        _gql_refresh_lock = asyncio.Lock()
+    async with _gql_refresh_lock:
+        if _gql_refreshed_this_process and not force:
+            return GRAPHQL_ENDPOINTS
+        _log.info("Refrescando GraphQL query IDs desde x.com…")
+        try:
+            merged = await refresh_endpoints(GRAPHQL_ENDPOINTS)
+        except (httpx.HTTPError, OSError, ValueError) as e:
+            _log.warning("Refresh GraphQL falló: %s", e)
+            _gql_refreshed_this_process = True  # no martillear la red
+            return GRAPHQL_ENDPOINTS
+        GRAPHQL_ENDPOINTS.clear()
+        GRAPHQL_ENDPOINTS.update(merged)
+        _gql_refreshed_this_process = True
+        return GRAPHQL_ENDPOINTS
 
 
 # ─── Excepciones ───────────────────────────────────────────────────────────────
@@ -357,9 +412,38 @@ class TwitterClient:
         variables: dict[str, Any],
         features: dict[str, Any] | None = None,
         mutation: bool = False,
+        _allow_refresh: bool = True,
     ) -> dict[str, Any]:
         """Ejecuta una query o mutation GraphQL contra la API interna de Twitter."""
-        ep = GRAPHQL_ENDPOINTS[endpoint_name]
+        try:
+            return await self._graphql_once(endpoint_name, variables, features, mutation)
+        except (NotFoundError, TwitterError) as e:
+            # QueryId roto: 404 o error GraphQL de operación inexistente.
+            # Es seguro reintentar incluso en mutations: la operación no llegó a ejecutarse.
+            if not _allow_refresh:
+                raise
+            msg = str(e)
+            is_404 = isinstance(e, NotFoundError)
+            if not (is_404 or _is_stale_query_error(msg)):
+                raise
+            _log.warning(
+                "Posible queryId obsoleto en %s (%s). Intentando refresh…",
+                endpoint_name,
+                msg[:120],
+            )
+            await refresh_graphql_endpoints(force=True)
+            return await self._graphql_once(endpoint_name, variables, features, mutation)
+
+    async def _graphql_once(
+        self,
+        endpoint_name: str,
+        variables: dict[str, Any],
+        features: dict[str, Any] | None,
+        mutation: bool,
+    ) -> dict[str, Any]:
+        ep = GRAPHQL_ENDPOINTS.get(endpoint_name)
+        if not ep:
+            raise TwitterError(f"Endpoint GraphQL desconocido: {endpoint_name}")
         query_id = ep["queryId"]
         operation = ep["operationName"]
 
@@ -400,6 +484,8 @@ class TwitterClient:
             if code == 88:
                 raise RateLimitError(message)
             if code == 34:
+                raise NotFoundError(message)
+            if _is_stale_query_error(message):
                 raise NotFoundError(message)
             raise TwitterError(f"API error {code}: {message}")
 

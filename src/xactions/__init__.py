@@ -23,12 +23,14 @@ from .actions import (
 )
 from .analyzer import analyze_tweets, parse_tweet_date
 from .client import (
+    GRAPHQL_ENDPOINTS,
     AuthError,
     ForbiddenError,
     NotFoundError,
     RateLimitError,
     TwitterClient,
     TwitterError,
+    refresh_graphql_endpoints,
 )
 from .db import TrackerDB, compute_profile_delta
 from .pool import ClientPool
@@ -98,6 +100,9 @@ __all__ = [
     "get_trends",
     "get_trends_sync",
     "validate_cookies_sync",
+    # graphql
+    "GRAPHQL_ENDPOINTS",
+    "refresh_graphql_endpoints",
     # actions
     "post_tweet",
     "delete_tweet",

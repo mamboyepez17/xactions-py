@@ -170,10 +170,11 @@ from xactions.cli import cli
 | 2.6 | Commit | `feat: auto-refresh GraphQL query IDs from X JS bundle` |
 
 ### Criterios de aceptación
-- [ ] Con bundle fixture, el refresh actualiza IDs
-- [ ] Endpoint roto → refresh → retry una vez → error claro si falla
-- [ ] Cache en disco evita re-descargar en cada request
-- [ ] Tests offline en CI
+- [x] Con bundle fixture, el refresh actualiza IDs
+- [x] Endpoint roto → refresh → retry una vez → error claro si falla
+- [x] Cache en disco evita re-descargar en cada request
+- [x] Tests offline en CI
+- [x] Fallback twikit cuando el bundle de X no expone los IDs
 
 ---
 

@@ -2,6 +2,16 @@
 
 ## v1.5.0 — 2026-08-17
 
+### Added (B2 GraphQL resilience)
+- **Auto-refresh de GraphQL query IDs** (`xactions/gql_refresh.py`):
+  - Parser de bundles de x.com (responsive-web y x-web + assets relativos).
+  - Formatos: `queryId`/`operationName` clásico y Relay `id`/`name`.
+  - Fallback remoto desde el `gql.py` de twikit.
+  - Cache en `~/.xactions/gql_endpoints.json`.
+- CLI: `xactions gql-status` y `xactions gql-refresh`.
+- El cliente reintenta una vez si un endpoint devuelve 404 / “Query does not exist”.
+- Env `XACTIONS_NO_GQL_REFRESH=1` para tests/CI sin red.
+
 ### Changed (BREAKING para imports)
 - El código vive ahora en el paquete instalable `src/xactions/` (antes carpetas sueltas `src/scraper`, `src/actions`, `src/analytics`, `src/storage`, `src/mcp_tools` + `cli/`).
 - **Guía de migración:**
@@ -19,6 +29,7 @@
 - `py.typed` en el paquete `xactions` (PEP 561).
 - `xactions/__init__.py` con API pública (`__all__`, `__version__`).
 - README actualizado con la nueva estructura y ejemplos de import.
+- MCP compatible con `mcp` 2.x (`MCPServer`) y 1.x (`FastMCP`).
 
 ### Fixed
 - `bulk_unfollow.on_progress` tipado como `Callable[[int, int, str], None]` (antes `callable`, inválido).
