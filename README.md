@@ -131,9 +131,18 @@ them automatically when one hits a rate limit or dies:
 auth_token=ACCOUNT1_TOKEN; ct0=ACCOUNT1_CT0
 auth_token=ACCOUNT2_TOKEN; ct0=ACCOUNT2_CT0
 
+chmod 600 cookies.txt   # Unix: restringe permisos
+
 xactions search "crypto" --cookies-file cookies.txt --limit 200
 xactions validate --cookies-file cookies.txt   # checks every account
 ```
+
+### Security notes (v1.5.0)
+
+- Prefer `TWITTER_COOKIES` in `.env` or `--cookies-file` over `--cookies` on the command line (argv can end up in shell history).
+- The CLI warns if you pass `--cookies` inline or if a cookies file is world-readable (Unix `chmod 600`).
+- Logs and error messages never print cookie **values** (only `auth_token=***`).
+- Never commit `.env` / `cookies.txt` (already in `.gitignore`).
 
 ---
 

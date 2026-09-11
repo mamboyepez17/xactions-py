@@ -13,6 +13,13 @@
 - El cliente reintenta una vez si un endpoint devuelve 404 / “Query does not exist” (pasando sus cookies al refresh).
 - Env `XACTIONS_NO_GQL_REFRESH=1` para tests/CI sin red.
 
+### Added (B3 seguridad cookies)
+- Módulo `xactions/security.py`: `redact_cookies` / `redact_in_text` (nunca imprime valores).
+- CLI: warning no bloqueante si pasas cookies con `--cookies` (historial del shell).
+- CLI: warning si `--cookies-file` es legible por otros en Unix (sugiere `chmod 600`).
+- Mensajes de error del CLI redactan `auth_token=` / `ct0=` si aparecen.
+- Docs de seguridad en README.
+
 ### Changed (BREAKING para imports)
 - El código vive ahora en el paquete instalable `src/xactions/` (antes carpetas sueltas `src/scraper`, `src/actions`, `src/analytics`, `src/storage`, `src/mcp_tools` + `cli/`).
 - **Guía de migración:**

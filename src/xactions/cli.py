@@ -73,6 +73,11 @@ from .scrapers import (
     scrape_tweets,
     search_tweets,
 )
+from .security import (
+    check_cookies_file_permissions,
+    redact_in_text,
+    warn_cli_cookies,
+)
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -97,6 +102,9 @@ def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
     if cookies_file:
         if not os.path.exists(cookies_file):
             raise click.ClickException(f"Archivo no encontrado: {cookies_file}")
+        perm_warn = check_cookies_file_permissions(cookies_file)
+        if perm_warn:
+            click.echo(f"⚠️  {perm_warn}", err=True)
         with open(cookies_file, encoding="utf-8") as f:
             raw = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
     else:
@@ -109,10 +117,18 @@ def _load_cookies_list(cookies: str, cookies_file: str | None) -> list[str]:
 def get_client(cookies: str = "", cookies_file: str | None = None) -> AnyClient:
     """Devuelve un TwitterClient (1 cookie) o un ClientPool (varias)."""
     cookie_list = _load_cookies_list(cookies, cookies_file)
+    cli_warn = warn_cli_cookies(cookies)
+    if cli_warn:
+        click.echo(f"⚠️  {cli_warn}", err=True)
     proxy = os.getenv(PROXY_ENV)
     if len(cookie_list) > 1:
         return ClientPool(cookie_list, proxy=proxy)
     return TwitterClient(cookies=cookie_list[0] if cookie_list else "", proxy=proxy)
+
+
+def _safe_error_message(e: Exception) -> str:
+    """Mensaje de error sin valores de cookies (por si vienen en el texto)."""
+    return redact_in_text(str(e))
 
 
 def with_client(func):
@@ -130,7 +146,7 @@ def with_client(func):
         try:
             return func(client, *args, **kwargs)
         except Exception as e:
-            click.echo(f"❌ {e}", err=True)
+            click.echo(f"❌ {_safe_error_message(e)}", err=True)
             sys.exit(1)
         finally:
             run(client.aclose())
@@ -308,7 +324,12 @@ def print_analysis(report: dict[str, Any], username: str):
 
 def common_options(fn):
     """Opciones comunes para comandos de lectura."""
-    fn = click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")(fn)
+    fn = click.option(
+        "--cookies",
+        envvar=COOKIES_ENV,
+        default="",
+        help="Cookies de sesión (preferir .env TWITTER_COOKIES o --cookies-file)",
+    )(fn)
     fn = click.option("--cookies-file", type=click.Path(exists=True), default=None,
                       help="Archivo con cookies (una por línea = pool multi-cuenta)")(fn)
     fn = click.option("--output", "-o", default=None, help="Archivo JSON de salida")(fn)

@@ -194,9 +194,9 @@ from xactions.cli import cli
 | 3.6 | Commit | `fix(security): redact cookies, warn on CLI --cookies, file perms` |
 
 ### Criterios de aceptación
-- [ ] Ningún path de logging imprime el token completo
-- [ ] `--cookies` emite warning no bloqueante
-- [ ] Docs actualizadas
+- [x] Ningún path de logging imprime el token completo
+- [x] `--cookies` emite warning no bloqueante
+- [x] Docs actualizadas
 
 ---
 
