@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "xactions-py"
 version = "1.5.0"
-description = "X/Twitter automation toolkit en Python puro. Sin npm. Sin Puppeteer."
+description = "X/Twitter automation toolkit in pure Python. No npm. No Puppeteer."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

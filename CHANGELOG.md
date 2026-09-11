@@ -2,84 +2,84 @@
 
 ## v1.5.0 — 2026-08-17
 
-### Added (B2 GraphQL resilience)
-- **Auto-refresh de GraphQL query IDs** (`xactions/gql_refresh.py`):
-  - Parser de bundles de x.com (responsive-web y x-web + assets relativos).
-  - Formatos: `queryId`/`operationName` clásico y Relay `id`/`name`.
-  - **Multi-fuente:** bundle logueado (si hay cookies) → bundle anónimo → fallback twikit.
-  - Cache en `~/.xactions/gql_endpoints.json`.
-- CLI: `xactions gql-status` y `xactions gql-refresh` (acepta cookies para crawl logueado).
-- `TwitterClient.refresh_gql_endpoints()` — refresh con las cookies de la sesión.
-- El cliente reintenta una vez si un endpoint devuelve 404 / “Query does not exist” (pasando sus cookies al refresh).
-- Env `XACTIONS_NO_GQL_REFRESH=1` para tests/CI sin red.
+### Added — GraphQL resilience
+- **Auto-refresh of GraphQL query IDs** (`xactions/gql_refresh.py`):
+  - Parses x.com JS bundles (responsive-web and x-web + relative assets).
+  - Formats: classic `queryId`/`operationName` and Relay `id`/`name`.
+  - **Multi-source:** logged-in bundle (if cookies) → anonymous bundle → twikit fallback.
+  - Cache at `~/.xactions/gql_endpoints.json`.
+- CLI: `xactions gql-status` and `xactions gql-refresh` (accepts cookies for a logged-in crawl).
+- `TwitterClient.refresh_gql_endpoints()` — refresh using the session cookies.
+- Client retries once when an endpoint returns 404 / “Query does not exist” (passing its cookies to refresh).
+- Env `XACTIONS_NO_GQL_REFRESH=1` to disable network refresh in tests/CI.
 
-### Added (B5 features)
-- **`build_search_query()`**: operadores `from:`, `to:`, `since:`, `until:`, `min_faves:`, `lang:`, `filter:media`, `-filter:retweets`…
+### Added — Features
+- **`build_search_query()`**: operators `from:`, `to:`, `since:`, `until:`, `min_faves:`, `lang:`, `filter:media`, `-filter:retweets`, etc.
 - **CLI `search`**: flags `--from`, `--to`, `--since`, `--until`, `--min-faves`, `--min-retweets`, `--lang`, `--exclude-retweets`, `--exclude-replies`, `--media`.
-- **`post_thread()` / CLI `thread` / MCP `x_post_thread`**: hilos encadenando replies.
-- **`compare_accounts()` / CLI `compare` / MCP `x_compare_accounts`**: métricas lado a lado de dos cuentas.
+- **`post_thread()` / CLI `thread` / MCP `x_post_thread`**: tweet threads by chaining replies.
+- **`compare_accounts()` / CLI `compare` / MCP `x_compare_accounts`**: side-by-side metrics for two accounts.
 - MCP `x_build_search_query`.
 
-### Added (B4 rate-limit + paginación)
-- **Throttle proactivo**: el client guarda `x-rate-limit-remaining` / `x-rate-limit-reset` por endpoint y espera *antes* del request si remaining=0 (en vez de solo reaccionar al 429).
-- **`max_rate_limit_wait`** configurable en `TwitterClient` (default 60s); el wait del 429 también se capa con ese valor.
-- `client.rate_limit_status()` para inspección.
-- **Páginas más grandes**: Followers/Following 100, engagement 50, tweets/home 40 (search sigue en 20 por límite de la API).
+### Added — Rate limiting + pagination
+- **Proactive throttle**: client stores `x-rate-limit-remaining` / `x-rate-limit-reset` per endpoint and waits *before* the request when remaining=0 (instead of only reacting to 429).
+- **`max_rate_limit_wait`** configurable on `TwitterClient` (default 60s); 429 waits are capped with the same value.
+- `client.rate_limit_status()` for inspection.
+- **Larger page sizes**: Followers/Following 100, engagement 50, tweets/home 40 (search stays at 20 due to API limits).
 
-### Added (B3 seguridad cookies)
-- Módulo `xactions/security.py`: `redact_cookies` / `redact_in_text` (nunca imprime valores).
-- CLI: warning no bloqueante si pasas cookies con `--cookies` (historial del shell).
-- CLI: warning si `--cookies-file` es legible por otros en Unix (sugiere `chmod 600`).
-- Mensajes de error del CLI redactan `auth_token=` / `ct0=` si aparecen.
-- Docs de seguridad en README.
+### Added — Cookie security
+- Module `xactions/security.py`: `redact_cookies` / `redact_in_text` (never print values).
+- CLI: non-blocking warning if cookies are passed with `--cookies` (shell history risk).
+- CLI: warning if `--cookies-file` is world-readable on Unix (suggests `chmod 600`).
+- CLI error messages redact `auth_token=` / `ct0=` when present.
+- Security notes in README.
 
-### Changed (BREAKING para imports)
-- El código vive ahora en el paquete instalable `src/xactions/` (antes carpetas sueltas `src/scraper`, `src/actions`, `src/analytics`, `src/storage`, `src/mcp_tools` + `cli/`).
-- **Guía de migración:**
-  - `from src.scraper.client import TwitterClient` → `from xactions.client import TwitterClient` (o `from xactions import TwitterClient`)
-  - `from src.scraper.scrapers import search_tweets` → `from xactions.scrapers import search_tweets` (o desde `xactions`)
+### Changed (BREAKING for imports)
+- Code now lives in the installable package `src/xactions/` (was loose folders `src/scraper`, `src/actions`, `src/analytics`, `src/storage`, `src/mcp_tools` + `cli/`).
+- **Migration guide:**
+  - `from src.scraper.client import TwitterClient` → `from xactions.client import TwitterClient` (or `from xactions import TwitterClient`)
+  - `from src.scraper.scrapers import search_tweets` → `from xactions.scrapers import search_tweets` (or from `xactions`)
   - `from src.actions.actions import like_tweet` → `from xactions.actions import like_tweet`
   - `from cli.xactions import cli` → `from xactions.cli import cli`
   - MCP: `python src/mcp_tools/server.py` → `python -m xactions.mcp_server`
-- Entry point del CLI: `xactions = xactions.cli:cli` (el comando `xactions` no cambia).
-- Eliminados todos los `sys.path.insert`.
-- `pyproject.toml`: packages bajo `src/`, `pythonpath` para pytest, ruff `src`.
+- CLI entry point: `xactions = xactions.cli:cli` (the `xactions` command name is unchanged).
+- Removed all `sys.path.insert` hacks.
+- `pyproject.toml`: packages under `src/`, pytest `pythonpath`, ruff `src`.
 
 ### Added
-- `LICENSE` MIT en la raíz.
-- `py.typed` en el paquete `xactions` (PEP 561).
-- `xactions/__init__.py` con API pública (`__all__`, `__version__`).
-- README actualizado con la nueva estructura y ejemplos de import.
-- MCP compatible con `mcp` 2.x (`MCPServer`) y 1.x (`FastMCP`).
+- MIT `LICENSE` at the repo root.
+- `py.typed` in the `xactions` package (PEP 561).
+- `xactions/__init__.py` public API (`__all__`, `__version__`).
+- README updated for the new structure and import examples.
+- MCP compatible with `mcp` 2.x (`MCPServer`) and 1.x (`FastMCP`).
 
 ### Fixed
-- `bulk_unfollow.on_progress` tipado como `Callable[[int, int, str], None]` (antes `callable`, inválido).
-- `post_tweet` extrae `tweet_id` de más formas de respuesta GraphQL (`rest_id`, `legacy.id_str`, `TweetWithVisibilityResults`).
-- `validate_cookies`: usa GraphQL (`HomeLatestTimeline`) en vez del REST `verify_credentials` deprecado.
-- CLI `post` muestra el mensaje de error de la API (antes solo “No se pudo publicar”).
-- Live test: validate/post/delete OK; hilo limitado por cupo diario de X (error 344), no por bug del cliente.
+- `bulk_unfollow.on_progress` typed as `Callable[[int, int, str], None]` (was invalid `callable`).
+- `post_tweet` extracts `tweet_id` from more GraphQL response shapes (`rest_id`, `legacy.id_str`, `TweetWithVisibilityResults`).
+- `validate_cookies`: uses GraphQL (`HomeLatestTimeline`) instead of deprecated REST `verify_credentials`.
+- CLI `post` prints the API error message (was only “Could not publish”).
+- Live test: validate/post/delete OK; thread limited by X daily tweet quota (error 344), not a client bug.
 
 ### Tests
-- **78 passing** (+38 desde v1.4.0): packaging, GraphQL refresh, seguridad, rate-limit, features B5.
+- **78 passing** (+38 since v1.4.0): packaging, GraphQL refresh, security, rate-limit, B5 features.
 
 ## v1.4.0 — 2026-08-17
 
 ### Fixed
-- `TwitterClient.close()`: la lógica de cierre síncrono estaba invertida y fallaba dentro de un loop corriendo; ahora programa el cierre sin bloquear.
-- Mutations (like, tweet, unfollow, bookmark...) ya no se reintentan ante errores de red — un timeout tras ser procesada por el servidor podía duplicar la acción.
-- CSRF token (`ct0`) se refresca automáticamente cuando Twitter lo rota vía `Set-Cookie` en la respuesta.
-- `search_tweets`: ante un bloqueo 403 sin resultados ahora propaga `ForbiddenError` (antes devolvía una lista vacía silenciosa); con resultados parciales los devuelve con warning.
-- `bulk_unfollow`: loggea cada fallo individual en vez de tragárselo silenciosamente.
-- MCP server: al cambiar las cookies se cierra (`aclose`) el cliente anterior — antes quedaban sockets abiertos hasta el GC.
-- `scrape_profile`: usuarios suspendidos/no disponibles ahora lanzan `NotFoundError` claro en vez de romper el CLI con `AttributeError`.
+- `TwitterClient.close()`: the synchronous close path was inverted and failed inside a running loop; it now schedules close without blocking.
+- Mutations (like, tweet, unfollow, bookmark…) are no longer retried on network errors — a timeout after the server processed the request could duplicate the action.
+- CSRF token (`ct0`) is refreshed automatically when Twitter rotates it via `Set-Cookie` on the response.
+- `search_tweets`: a 403 block with no results now raises `ForbiddenError` (previously returned an empty list silently); partial results are returned with a warning.
+- `bulk_unfollow`: logs each individual failure instead of swallowing it.
+- MCP server: changing cookies now `aclose`s the previous client (sockets used to leak until GC).
+- `scrape_profile`: suspended/unavailable users raise a clear `NotFoundError` instead of crashing the CLI with `AttributeError`.
 
 ### Added
-- Headers `x-client-uuid` y `x-client-transaction-id` en todas las peticiones (compatibilidad con la GraphQL actual, igual que twikit).
-- MCP `x_bulk_unfollow_non_followers`: parámetro `dry_run` para previsualizar sin ejecutar.
-- SQLite: `PRAGMA journal_mode=WAL` + `busy_timeout` para uso concurrente seguro.
-- CLI refactorizado con decorador `@with_client` (~100 líneas menos de boilerplate); la versión se lee de `importlib.metadata` (fuente única: `pyproject.toml`).
-- CI: matriz con `windows-latest` además de `ubuntu-latest`.
-- Tests: 40 passing (mutation no-retry, ct0 refresh, `close()` en loop, búsqueda bloqueada, CLI con `CliRunner`).
+- Headers `x-client-uuid` and `x-client-transaction-id` on all requests (current GraphQL compatibility, same as twikit).
+- MCP `x_bulk_unfollow_non_followers`: `dry_run` parameter to preview without executing.
+- SQLite: `PRAGMA journal_mode=WAL` + `busy_timeout` for safe concurrent use.
+- CLI refactored with `@with_client` decorator (~100 lines less boilerplate); version read from `importlib.metadata` (single source: `pyproject.toml`).
+- CI: matrix with `windows-latest` in addition to `ubuntu-latest`.
+- Tests: 40 passing (mutation no-retry, ct0 refresh, `close()` in loop, blocked search, CLI with `CliRunner`).
 
 ## v1.3.0 — 2026-07-27
 
