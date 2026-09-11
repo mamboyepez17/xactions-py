@@ -31,7 +31,7 @@ The original XActions is great but depends on npm, which has been the target of 
 
 - **📦 Paquete instalable real**: código en `src/xactions/`, imports `from xactions import ...`, sin `sys.path`
 - **🔑 API pública unificada**: `TwitterClient`, scrapers, actions y wrappers sync desde un solo import
-- **🔄 GraphQL auto-refresh**: si un queryId se rompe, el cliente reintenta tras refrescar IDs desde el bundle de X (fallback twikit) — `xactions gql-status` / `xactions gql-refresh`
+- **🔄 GraphQL auto-refresh**: si un queryId se rompe, el cliente reintenta tras refrescar IDs (bundle logueado → anónimo → twikit) — `xactions gql-status` / `xactions gql-refresh`
 - **📜 LICENSE MIT** y marcador `py.typed` (soporte de tipos estáticos)
 - **🖥️ CLI/MCP**: `xactions ...` y `python -m xactions.mcp_server` (ya no `python cli/xactions.py`)
 - **🤖 MCP 2.x**: compatible con `mcp>=2` (`MCPServer`) y `mcp` 1.x (`FastMCP`)
@@ -380,7 +380,7 @@ Twitter's internal query IDs change when they deploy new JS bundles. v1.5.0 miti
 1. **Auto-refresh** — on a stale query (HTTP 404 / “Query does not exist”), the client refreshes IDs once and retries.
 2. **Manual** — `xactions gql-refresh` (or `gql-status` to inspect the cache).
 3. Cache lives at `~/.xactions/gql_endpoints.json`.
-4. Discovery: parse x.com web bundles (responsive-web / x-web), with fallback to [twikit `gql.py`](https://github.com/d60/twikit/blob/main/twikit/client/gql.py).
+4. Discovery multi-fuente: bundle logueado de X (si hay cookies) → bundle anónimo → [twikit `gql.py`](https://github.com/d60/twikit/blob/main/twikit/client/gql.py) como fallback.
 
 If an endpoint still fails after refresh, check twikit or update `src/xactions/client.py` defaults.
 

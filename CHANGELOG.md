@@ -6,10 +6,11 @@
 - **Auto-refresh de GraphQL query IDs** (`xactions/gql_refresh.py`):
   - Parser de bundles de x.com (responsive-web y x-web + assets relativos).
   - Formatos: `queryId`/`operationName` clásico y Relay `id`/`name`.
-  - Fallback remoto desde el `gql.py` de twikit.
+  - **Multi-fuente:** bundle logueado (si hay cookies) → bundle anónimo → fallback twikit.
   - Cache en `~/.xactions/gql_endpoints.json`.
-- CLI: `xactions gql-status` y `xactions gql-refresh`.
-- El cliente reintenta una vez si un endpoint devuelve 404 / “Query does not exist”.
+- CLI: `xactions gql-status` y `xactions gql-refresh` (acepta cookies para crawl logueado).
+- `TwitterClient.refresh_gql_endpoints()` — refresh con las cookies de la sesión.
+- El cliente reintenta una vez si un endpoint devuelve 404 / “Query does not exist” (pasando sus cookies al refresh).
 - Env `XACTIONS_NO_GQL_REFRESH=1` para tests/CI sin red.
 
 ### Changed (BREAKING para imports)

@@ -881,12 +881,23 @@ def gql_status(output):
 
 
 @cli.command("gql-refresh")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión (mejora el crawl logueado)")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
 @click.option("--output", "-o", default=None, help="Archivo JSON de salida")
-def gql_refresh_cmd(output):
-    """Descarga el bundle de x.com y actualiza los GraphQL query IDs."""
+def gql_refresh_cmd(cookies, cookies_file, output):
+    """
+    Actualiza los GraphQL query IDs.
+
+    Con cookies se prioriza el bundle logueado de X; sin ellas se intenta
+    anónimo y se cae a twikit como fallback.
+    """
     from .client import refresh_graphql_endpoints
 
-    merged = run(refresh_graphql_endpoints(force=True))
+    cookie_list = _load_cookies_list(cookies, cookies_file)
+    cookie = cookie_list[0] if cookie_list else None
+    if cookie:
+        click.echo("🔐 Usando cookies para crawl logueado (sin imprimir el token)")
+    merged = run(refresh_graphql_endpoints(force=True, cookie=cookie))
     changed = {
         name: ep.get("queryId")
         for name, ep in sorted(merged.items())

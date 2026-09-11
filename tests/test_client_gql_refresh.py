@@ -38,7 +38,7 @@ async def test_stale_query_id_triggers_refresh_and_retry(reset_gql, monkeypatch)
         )
     )
 
-    async def fake_refresh(force: bool = False):
+    async def fake_refresh(force: bool = False, cookie: str | None = None):
         GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = new_id
         return GRAPHQL_ENDPOINTS
 
@@ -65,7 +65,7 @@ async def test_plain_404_without_refresh_when_disabled(reset_gql, monkeypatch):
 
     called = {"n": 0}
 
-    async def fake_refresh(force: bool = False):
+    async def fake_refresh(force: bool = False, cookie: str | None = None):
         called["n"] += 1
         return GRAPHQL_ENDPOINTS
 

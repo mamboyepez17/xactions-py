@@ -174,3 +174,54 @@ async def test_discover_from_bundles(tmp_path: Path):
     assert path.exists()
     data = json.loads(path.read_text(encoding="utf-8"))
     assert "updated_at" in data
+
+
+@respx.mock
+async def test_refresh_prefers_auth_bundle_and_falls_back_to_twikit(tmp_path: Path):
+    """Sin cookie → twikit. Con cookie → bundle logueado manda."""
+    from xactions.gql_refresh import refresh_endpoints
+
+    respx.get("https://x.com").mock(return_value=httpx.Response(200, text=FAKE_HTML))
+    for u in (
+        "https://abs.twimg.com/responsive-web/client-web/main.abc123.js",
+        "https://abs.twimg.com/responsive-web/client-web/api.def456.js",
+        "https://abs.twimg.com/x-web/x-web/entry-client-logged-out-Abc.js",
+    ):
+        respx.get(u).mock(return_value=httpx.Response(200, text="/* empty */"))
+    respx.get("https://raw.githubusercontent.com/d60/twikit/main/twikit/client/gql.py").mock(
+        return_value=httpx.Response(200, text=FAKE_TWIKIT)
+    )
+
+    base = {
+        "UserByScreenName": {"queryId": "old", "operationName": "UserByScreenName"},
+        "SearchTimeline": {"queryId": "oldsearch", "operationName": "SearchTimeline"},
+        "CreateTweet": {"queryId": "oldcreate", "operationName": "CreateTweet"},
+    }
+
+    # Sin cookies: bundles vacíos → twikit
+    path1 = tmp_path / "a.json"
+    merged = await refresh_endpoints(base, cache_path=path1, persist=True)
+    assert merged["UserByScreenName"]["queryId"] == "TWIKITUSERID12345678"
+    assert json.loads(path1.read_text(encoding="utf-8"))["source"] == "twikit"
+
+    # Con cookies: mockeamos que el HTML trae entry-client-logged-in con ops
+    logged_html = FAKE_HTML.replace(
+        "entry-client-logged-out-Abc.js",
+        "entry-client-logged-in-XYZ.js",
+    )
+    respx.get("https://x.com").mock(return_value=httpx.Response(200, text=logged_html))
+    respx.get("https://abs.twimg.com/x-web/x-web/entry-client-logged-in-XYZ.js").mock(
+        return_value=httpx.Response(200, text=FAKE_JS)
+    )
+
+    path2 = tmp_path / "b.json"
+    merged2 = await refresh_endpoints(
+        base,
+        cache_path=path2,
+        persist=True,
+        cookie="auth_token=abc; ct0=xyz",
+    )
+    # FAKE_JS trae los IDs "reales" de UserByScreenName / SearchTimeline
+    assert merged2["UserByScreenName"]["queryId"] == "NimuplG1OB7Fd2btCLdBOw"
+    assert merged2["SearchTimeline"]["queryId"] == "NEWSEARCHID1234567890"
+    assert json.loads(path2.read_text(encoding="utf-8"))["source"] == "bundle-auth"

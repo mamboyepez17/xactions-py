@@ -128,10 +128,14 @@ def _is_stale_query_error(message: str) -> bool:
     return any(n in msg for n in needles)
 
 
-async def refresh_graphql_endpoints(force: bool = False) -> dict[str, dict[str, Any]]:
+async def refresh_graphql_endpoints(
+    force: bool = False,
+    cookie: str | None = None,
+) -> dict[str, dict[str, Any]]:
     """
-    Refresca GRAPHQL_ENDPOINTS desde el JS bundle de x.com (una vez por proceso
-    salvo force=True). Actualiza el store global y devuelve los endpoints.
+    Refresca GRAPHQL_ENDPOINTS (una vez por proceso salvo force=True).
+    Si se pasa `cookie` (auth_token/ct0), se prioriza el bundle logueado de X
+    y twikit queda solo como fallback.
     """
     global _gql_refreshed_this_process, _gql_refresh_lock
     if _NO_GQL_REFRESH:
@@ -142,9 +146,9 @@ async def refresh_graphql_endpoints(force: bool = False) -> dict[str, dict[str, 
     async with _gql_refresh_lock:
         if _gql_refreshed_this_process and not force:
             return GRAPHQL_ENDPOINTS
-        _log.info("Refrescando GraphQL query IDs desde x.com…")
+        _log.info("Refrescando GraphQL query IDs (auth=%s)…", bool(cookie))
         try:
-            merged = await refresh_endpoints(GRAPHQL_ENDPOINTS)
+            merged = await refresh_endpoints(GRAPHQL_ENDPOINTS, cookie=cookie)
         except (httpx.HTTPError, OSError, ValueError) as e:
             _log.warning("Refresh GraphQL falló: %s", e)
             _gql_refreshed_this_process = True  # no martillear la red
@@ -431,7 +435,7 @@ class TwitterClient:
                 endpoint_name,
                 msg[:120],
             )
-            await refresh_graphql_endpoints(force=True)
+            await refresh_graphql_endpoints(force=True, cookie=self._cookie_str or None)
             return await self._graphql_once(endpoint_name, variables, features, mutation)
 
     async def _graphql_once(
@@ -565,3 +569,15 @@ class TwitterClient:
             }
         except (AuthError, ForbiddenError) as e:
             return {"valid": False, "error": str(e)}
+
+    # ─── GraphQL query ID refresh (con cookies de esta sesión) ─────────────────
+
+    async def refresh_gql_endpoints(self, force: bool = True) -> dict[str, dict[str, Any]]:
+        """
+        Refresca los query IDs GraphQL usando las cookies de este cliente
+        (bundle logueado primero; twikit solo como fallback).
+        """
+        return await refresh_graphql_endpoints(
+            force=force,
+            cookie=self._cookie_str or None,
+        )

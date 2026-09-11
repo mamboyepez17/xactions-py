@@ -197,15 +197,35 @@ def _bundle_urls_from_html(html: str) -> list[str]:
         if u not in seen:
             seen.add(u)
             ordered.append(u)
-    # preferir main*.js / entry-client* primero
+    # preferir entry logueado, luego main/entry, luego el resto
     def _prio(u: str) -> tuple[int, str]:
         name = u.rsplit("/", 1)[-1]
-        if name.startswith("main") or name.startswith("entry"):
+        if "logged-in" in name:
             return (0, u)
-        return (1, u)
+        if name.startswith("main") or name.startswith("entry"):
+            return (1, u)
+        return (2, u)
 
     ordered.sort(key=_prio)
     return ordered
+
+
+def build_web_headers(cookie: str | None = None, user_agent: str | None = None) -> dict[str, str]:
+    """Headers para descargar HTML/bundles de x.com. Con cookie → sesión logueada."""
+    hdrs = {
+        "User-Agent": user_agent
+        or (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://x.com/home",
+        "Origin": "https://x.com",
+    }
+    if cookie:
+        hdrs["Cookie"] = cookie
+    return hdrs
 
 
 async def discover_from_bundles(
@@ -213,22 +233,18 @@ async def discover_from_bundles(
     headers: dict[str, str] | None = None,
     max_bundles: int = 12,
     max_assets: int = 40,
+    min_ops: int = 3,
 ) -> dict[str, dict[str, str]]:
     """
     Descarga HTML de x.com y parsea los bundles JS buscando queryIds.
     Sigue imports relativos de x-web (./assets/*.js).
+    Con Cookie en headers, X sirve el entry-client-logged-in (más operaciones).
     """
-    hdrs = headers or {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml",
-    }
+    hdrs = headers or build_web_headers()
     resp = await http.get("https://x.com", headers=hdrs, follow_redirects=True)
     resp.raise_for_status()
     bundles = _bundle_urls_from_html(resp.text)
-    _log.info("Bundles JS candidatos: %d", len(bundles))
+    _log.info("Bundles JS candidatos: %d (auth=%s)", len(bundles), "Cookie" in hdrs)
 
     discovered: dict[str, dict[str, str]] = {}
     queue = list(bundles)
@@ -258,7 +274,7 @@ async def discover_from_bundles(
                 queue.append(abs_url)
 
         critical = {"UserByScreenName", "UserTweets", "SearchTimeline", "CreateTweet"}
-        if critical.issubset(discovered):
+        if len(discovered) >= min_ops and critical.issubset(discovered):
             break
 
     return discovered
@@ -275,29 +291,67 @@ async def discover_from_twikit(
     return extract_operations_from_twikit(resp.text)
 
 
+# Umbral: con menos de esto preferimos otra fuente
+_MIN_USEFUL_OPS = 5
+_CRITICAL_OPS = ("UserByScreenName", "UserTweets", "SearchTimeline", "CreateTweet")
+
+
+def _is_useful(ops: dict[str, dict[str, str]]) -> bool:
+    if len(ops) >= _MIN_USEFUL_OPS:
+        return True
+    return all(k in ops for k in _CRITICAL_OPS)
+
+
 async def refresh_endpoints(
     base: dict[str, dict[str, Any]],
     http: httpx.AsyncClient | None = None,
     cache_path: Path | str | None = None,
     persist: bool = True,
     headers: dict[str, str] | None = None,
+    cookie: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """
     Descubre queryIds nuevos y devuelve los endpoints mezclados.
-    Orden: bundle de x.com → fallback twikit. Si nada funciona, devuelve `base`.
+
+    Cadena multi-fuente (la primera “buena” gana):
+      1. Bundle x.com **logueado** (si hay cookie)
+      2. Bundle x.com anónimo
+      3. twikit gql.py (fallback comunitario)
+
+    Si nada funciona, devuelve `base` sin tocar.
     """
     owns_client = http is None
     if owns_client:
-        http = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+        http = httpx.AsyncClient(timeout=45.0, follow_redirects=True)
     try:
-        source = "bundle"
+        source = "none"
         discovered: dict[str, dict[str, str]] = {}
-        try:
-            discovered = await discover_from_bundles(http, headers=headers)
-        except (httpx.HTTPError, OSError, ValueError) as e:
-            _log.warning("Bundle x.com no disponible: %s", e)
+        auth_headers = headers or build_web_headers(cookie)
+        anon_headers = headers if cookie is None else build_web_headers()
 
-        if len(discovered) < 3:
+        # 1) Bundle autenticado
+        if cookie or (headers and headers.get("Cookie")):
+            try:
+                auth_ops = await discover_from_bundles(http, headers=auth_headers)
+                if auth_ops:
+                    discovered = auth_ops
+                    source = "bundle-auth"
+                    _log.info("Bundle logueado: %d operaciones", len(auth_ops))
+            except (httpx.HTTPError, OSError, ValueError) as e:
+                _log.warning("Bundle logueado no disponible: %s", e)
+
+        # 2) Bundle anónimo (si aún no tenemos algo útil)
+        if not _is_useful(discovered):
+            try:
+                anon_ops = await discover_from_bundles(http, headers=anon_headers)
+                if len(anon_ops) > len(discovered):
+                    discovered = anon_ops
+                    source = "bundle"
+            except (httpx.HTTPError, OSError, ValueError) as e:
+                _log.warning("Bundle anónimo no disponible: %s", e)
+
+        # 3) twikit
+        if not _is_useful(discovered):
             try:
                 remote = await discover_from_twikit(http)
                 if len(remote) > len(discovered):
@@ -308,7 +362,7 @@ async def refresh_endpoints(
                 _log.warning("Fallback twikit no disponible: %s", e)
 
         if not discovered:
-            _log.warning("Refresh GraphQL: no se extrajeron queryIds (bundle ni twikit)")
+            _log.warning("Refresh GraphQL: no se extrajeron queryIds (ninguna fuente)")
             return {k: dict(v) for k, v in base.items()}
 
         merged = merge_endpoints(base, discovered)
