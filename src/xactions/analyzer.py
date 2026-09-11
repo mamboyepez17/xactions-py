@@ -152,3 +152,63 @@ def analyze_tweets(
         "best_days": [{"day": d, "engagement": e} for d, e in best_days],
         "content": content,
     }
+
+
+def compare_accounts(
+    profile_a: dict[str, Any],
+    tweets_a: list[dict[str, Any]],
+    profile_b: dict[str, Any],
+    tweets_b: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """
+    Compara dos cuentas lado a lado (perfil + engagement de tweets recientes).
+    """
+    report_a = analyze_tweets(tweets_a, profile=profile_a)
+    report_b = analyze_tweets(tweets_b, profile=profile_b)
+
+    def _side(profile: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "username": profile.get("username"),
+            "name": profile.get("name"),
+            "followers": profile.get("followers"),
+            "following": profile.get("following"),
+            "tweets_count": profile.get("tweets_count"),
+            "verified": profile.get("verified"),
+            "analyzed_tweets": report.get("total_tweets"),
+            "averages": report.get("averages"),
+            "engagement_rate_followers": report.get("engagement_rate_followers"),
+            "engagement_rate_views": report.get("engagement_rate_views"),
+        }
+
+    a = _side(profile_a, report_a)
+    b = _side(profile_b, report_b)
+
+    def _winner(key: str, higher_is_better: bool = True) -> str | None:
+        va = a.get(key)
+        vb = b.get(key)
+        if va is None or vb is None:
+            return None
+        try:
+            if va == vb:
+                return "tie"
+            if higher_is_better:
+                return a["username"] if va > vb else b["username"]
+            return a["username"] if va < vb else b["username"]
+        except TypeError:
+            return None
+
+    avg_a = (report_a.get("averages") or {}).get("likes") or 0
+    avg_b = (report_b.get("averages") or {}).get("likes") or 0
+
+    return {
+        "a": a,
+        "b": b,
+        "winner": {
+            "followers": _winner("followers"),
+            "engagement_rate_followers": _winner("engagement_rate_followers"),
+            "avg_likes": (
+                a["username"] if avg_a > avg_b else b["username"] if avg_b > avg_a else "tie"
+            ),
+        },
+        "reports": {"a": report_a, "b": report_b},
+    }

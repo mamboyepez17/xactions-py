@@ -75,6 +75,46 @@ async def post_tweet(
     return {"success": bool(result), "tweet_id": result.get("rest_id")}
 
 
+async def post_thread(
+    client: TwitterClient,
+    tweets: list[str],
+    delay_seconds: float = 1.5,
+) -> dict[str, Any]:
+    """
+    Publica un hilo: cada tweet responde al anterior.
+    Requiere auth. `delay_seconds` entre tweets para evitar rate limits.
+    """
+    _require_auth(client)
+    if not tweets:
+        return {"success": False, "tweet_ids": [], "error": "lista vacía"}
+
+    tweet_ids: list[str] = []
+    reply_to: str | None = None
+    for i, text in enumerate(tweets):
+        text = (text or "").strip()
+        if not text:
+            continue
+        result = await post_tweet(client, text, reply_to_id=reply_to)
+        if not result.get("success") or not result.get("tweet_id"):
+            return {
+                "success": False,
+                "tweet_ids": tweet_ids,
+                "failed_at": i,
+                "error": f"No se pudo publicar el tweet {i + 1}/{len(tweets)}",
+            }
+        tweet_ids.append(result["tweet_id"])
+        reply_to = result["tweet_id"]
+        if i < len(tweets) - 1:
+            await asyncio.sleep(delay_seconds)
+
+    return {
+        "success": True,
+        "tweet_ids": tweet_ids,
+        "root_id": tweet_ids[0] if tweet_ids else None,
+        "count": len(tweet_ids),
+    }
+
+
 async def delete_tweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
     data = await client.graphql(

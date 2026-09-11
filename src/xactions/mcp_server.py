@@ -36,12 +36,13 @@ from .actions import (
     delete_tweet,
     follow_user,
     like_tweet,
+    post_thread,
     post_tweet,
     retweet,
     unfollow_user,
     unlike_tweet,
 )
-from .analyzer import analyze_tweets
+from .analyzer import analyze_tweets, compare_accounts
 from .client import (
     AuthError,
     ForbiddenError,
@@ -67,6 +68,7 @@ from .scrapers import (
     scrape_tweets,
     search_tweets,
 )
+from .search_query import build_search_query
 
 # ─── Inicialización ───────────────────────────────────────────────────────────
 
@@ -395,6 +397,74 @@ async def x_post_tweet(
         return "❌ No se pudo publicar el tweet."
     except Exception as e:
         return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_post_thread(tweets: list[str], delay: float = 1.5) -> str:
+    """
+    Publica un hilo de tweets (cada uno responde al anterior). Requiere auth.
+    tweets: lista de textos en orden
+    delay: segundos entre tweets (default 1.5)
+    """
+    try:
+        client = get_client()
+        result = await post_thread(client, tweets, delay_seconds=delay)
+        if result["success"]:
+            return (
+                f"✅ Hilo publicado ({result['count']} tweets).\n"
+                f"  Root: {result['root_id']}\n"
+                f"  IDs: {', '.join(result['tweet_ids'])}"
+            )
+        return f"❌ {result.get('error', 'Error publicando hilo')}"
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_compare_accounts(user_a: str, user_b: str, limit: int = 50) -> str:
+    """
+    Compara dos cuentas: followers, engagement rate y promedios.
+    user_a / user_b: nombres de usuario sin @
+    limit: tweets recientes a analizar por cuenta (default 50)
+    """
+    try:
+        client = get_client()
+        prof_a, tw_a, prof_b, tw_b = await asyncio.gather(
+            scrape_profile(client, user_a),
+            scrape_tweets(client, user_a, limit=limit),
+            scrape_profile(client, user_b),
+            scrape_tweets(client, user_b, limit=limit),
+        )
+        report = compare_accounts(prof_a, tw_a, prof_b, tw_b)
+        return json.dumps(report, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_build_search_query(
+    base: str = "",
+    from_user: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    min_faves: int | None = None,
+    lang: str | None = None,
+    exclude_retweets: bool = False,
+) -> str:
+    """
+    Construye una query de búsqueda avanzada de X (operadores from/since/min_faves…).
+    Úsala con x_search_tweets.
+    """
+    q = build_search_query(
+        base,
+        from_user=from_user,
+        since=since,
+        until=until,
+        min_faves=min_faves,
+        lang=lang,
+        exclude_retweets=exclude_retweets,
+    )
+    return json.dumps({"query": q}, ensure_ascii=False)
 
 
 @mcp.tool()

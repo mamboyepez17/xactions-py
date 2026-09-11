@@ -202,6 +202,14 @@ xactions non-followers YOUR_USERNAME --table
 # Tweets and search
 xactions tweets elonmusk --limit 50 --table
 xactions search "artificial intelligence" --mode Top
+xactions search "crypto" --from elonmusk --min-faves 100 --lang es --exclude-retweets
+
+# Thread (hilo)
+xactions thread "Parte 1 del hilo" "Parte 2" "Cierre"
+xactions thread --from-file hilo.txt --delay 2
+
+# Compare accounts
+xactions compare userA userB --limit 50
 
 # Engagement & conversation
 xactions replies 1234567890 --limit 30 --table

@@ -23,6 +23,7 @@ import csv
 import functools
 import json
 import os
+import re
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
@@ -48,12 +49,13 @@ from .actions import (
     delete_tweet,
     follow_user,
     like_tweet,
+    post_thread,
     post_tweet,
     unfollow_user,
     unlike_tweet,
     upload_media,
 )
-from .analyzer import analyze_tweets
+from .analyzer import analyze_tweets, compare_accounts
 from .client import TwitterClient
 from .db import TrackerDB, compute_profile_delta
 from .pool import ClientPool
@@ -73,6 +75,7 @@ from .scrapers import (
     scrape_tweets,
     search_tweets,
 )
+from .search_query import build_search_query
 from .security import (
     check_cookies_file_permissions,
     redact_in_text,
@@ -451,20 +454,49 @@ def tweets(client, username, limit, replies, output, csv_path, ndjson_path, tabl
 
 
 @cli.command()
-@click.argument("query")
+@click.argument("query", required=False, default="")
 @click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de resultados")
 @click.option("--mode", default="Top", type=click.Choice(["Latest", "Top"]), show_default=True)
+@click.option("--from", "from_user", default=None, help="Operador from:USERNAME")
+@click.option("--to", "to_user", default=None, help="Operador to:USERNAME")
+@click.option("--since", default=None, help="since:YYYY-MM-DD")
+@click.option("--until", default=None, help="until:YYYY-MM-DD")
+@click.option("--min-faves", type=int, default=None, help="min_faves:N")
+@click.option("--min-retweets", type=int, default=None, help="min_retweets:N")
+@click.option("--lang", default=None, help="lang:es|en|...")
+@click.option("--exclude-retweets", is_flag=True, help="-filter:retweets")
+@click.option("--exclude-replies", is_flag=True, help="-filter:replies")
+@click.option("--media", "filter_media", is_flag=True, help="filter:media")
 @common_options
 @with_client
-def search(client, query, limit, mode, output, csv_path, ndjson_path, table):
-    """Busca tweets por query."""
-    data = run(search_tweets(client, query, limit=limit, mode=mode))
+def search(
+    client, query, limit, mode, from_user, to_user, since, until,
+    min_faves, min_retweets, lang, exclude_retweets, exclude_replies, filter_media,
+    output, csv_path, ndjson_path, table,
+):
+    """Busca tweets por query (acepta operadores avanzados)."""
+    q = build_search_query(
+        query,
+        from_user=from_user,
+        to_user=to_user,
+        since=since,
+        until=until,
+        min_faves=min_faves,
+        min_retweets=min_retweets,
+        lang=lang,
+        exclude_retweets=exclude_retweets,
+        exclude_replies=exclude_replies,
+        filter_media=filter_media,
+    )
+    if not q.strip():
+        raise click.ClickException("Query vacía: pasa un término o flags (--from, --lang, …)")
+    data = run(search_tweets(client, q, limit=limit, mode=mode))
     _handle_output(
-        {"query": query, "count": len(data), "tweets": data},
+        {"query": q, "count": len(data), "tweets": data},
         output, csv_path, ndjson_path,
         csv_data=_flatten_tweets(data),
         table_fn=print_tweets_table if table else None,
-        table_title=f'Resultados: "{query}" ({mode})',
+        table_title=f'Resultados: "{q}" ({mode})',
     )
 
 
@@ -709,6 +741,95 @@ def post(client, text, reply_to, media_files):
     else:
         click.echo("❌ No se pudo publicar.", err=True)
         sys.exit(1)
+
+
+@cli.command()
+@click.argument("tweets", nargs=-1)
+@click.option("--from-file", type=click.Path(exists=True), default=None,
+              help="Archivo de texto: un tweet por línea o separados por ---")
+@click.option("--delay", default=1.5, show_default=True, help="Segundos entre tweets del hilo")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@with_client
+def thread(client, tweets, from_file, delay):
+    """Publica un hilo. Cada argumento es un tweet, o usa --from-file."""
+    parts: list[str] = []
+    if from_file:
+        raw = open(from_file, encoding="utf-8").read()
+        # separar por --- o saltos dobles si no hay ---
+        if "\n---\n" in raw or raw.strip().startswith("---"):
+            chunks = [c.strip() for c in re.split(r"\n?---\n?", raw) if c.strip()]
+        else:
+            chunks = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        parts.extend(chunks)
+    parts.extend(t.strip() for t in tweets if t and t.strip())
+
+    if not parts:
+        raise click.ClickException("Pasa tweets como argumentos o usa --from-file")
+
+    click.echo(f"🧵 Publicando hilo de {len(parts)} tweets…")
+    result = run(post_thread(client, parts, delay_seconds=delay))
+    if result["success"]:
+        click.echo(f"✅ Hilo publicado. Root: {result['root_id']} ({result['count']} tweets)")
+    else:
+        click.echo(f"❌ {result.get('error', 'Error')}", err=True)
+        if result.get("tweet_ids"):
+            click.echo(f"   Publicados parcialmente: {', '.join(result['tweet_ids'])}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument("user_a")
+@click.argument("user_b")
+@click.option("--limit", "-l", default=50, show_default=True, help="Tweets a analizar por cuenta")
+@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--table", is_flag=True, help="Mostrar como tabla")
+@with_client
+def compare(client, user_a, user_b, limit, output, table):
+    """Compara dos cuentas: followers, engagement rate y promedios."""
+
+    async def _collect():
+        prof_a, tw_a, prof_b, tw_b = await asyncio.gather(
+            scrape_profile(client, user_a),
+            scrape_tweets(client, user_a, limit=limit),
+            scrape_profile(client, user_b),
+            scrape_tweets(client, user_b, limit=limit),
+        )
+        return prof_a, tw_a, prof_b, tw_b
+
+    prof_a, tw_a, prof_b, tw_b = run(_collect())
+    report = compare_accounts(prof_a, tw_a, prof_b, tw_b)
+
+    if output:
+        print_json(report, output)
+        return
+
+    a, b = report["a"], report["b"]
+    click.echo(f"\n{'═'*60}")
+    click.echo(f"  Comparativa @{a['username']} vs @{b['username']}")
+    click.echo(f"{'═'*60}")
+    click.echo(f"  {'Métrica':<28} {'@' + str(a['username']):>14} {'@' + str(b['username']):>14}")
+    click.echo(f"  {'-'*56}")
+    rows = [
+        ("Followers", a.get("followers"), b.get("followers")),
+        ("Following", a.get("following"), b.get("following")),
+        ("Tweets (total)", a.get("tweets_count"), b.get("tweets_count")),
+        ("Avg likes", (a.get("averages") or {}).get("likes"), (b.get("averages") or {}).get("likes")),
+        ("Avg RTs", (a.get("averages") or {}).get("retweets"), (b.get("averages") or {}).get("retweets")),
+        ("Avg views", (a.get("averages") or {}).get("views"), (b.get("averages") or {}).get("views")),
+        ("ER followers %", a.get("engagement_rate_followers"), b.get("engagement_rate_followers")),
+    ]
+    for label, va, vb in rows:
+        fa = f"{va:,}" if isinstance(va, (int, float)) else "—"
+        fb = f"{vb:,}" if isinstance(vb, (int, float)) else "—"
+        click.echo(f"  {label:<28} {fa:>14} {fb:>14}")
+    winners = report.get("winner") or {}
+    click.echo(f"\n  Ganadores: followers={winners.get('followers')} · "
+               f"ER={winners.get('engagement_rate_followers')} · "
+               f"likes={winners.get('avg_likes')}")
+    click.echo(f"{'═'*60}\n")
 
 
 @cli.command()

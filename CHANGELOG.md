@@ -13,6 +13,13 @@
 - El cliente reintenta una vez si un endpoint devuelve 404 / “Query does not exist” (pasando sus cookies al refresh).
 - Env `XACTIONS_NO_GQL_REFRESH=1` para tests/CI sin red.
 
+### Added (B5 features)
+- **`build_search_query()`**: operadores `from:`, `to:`, `since:`, `until:`, `min_faves:`, `lang:`, `filter:media`, `-filter:retweets`…
+- **CLI `search`**: flags `--from`, `--to`, `--since`, `--until`, `--min-faves`, `--min-retweets`, `--lang`, `--exclude-retweets`, `--exclude-replies`, `--media`.
+- **`post_thread()` / CLI `thread` / MCP `x_post_thread`**: hilos encadenando replies.
+- **`compare_accounts()` / CLI `compare` / MCP `x_compare_accounts`**: métricas lado a lado de dos cuentas.
+- MCP `x_build_search_query`.
+
 ### Added (B4 rate-limit + paginación)
 - **Throttle proactivo**: el client guarda `x-rate-limit-remaining` / `x-rate-limit-reset` por endpoint y espera *antes* del request si remaining=0 (en vez de solo reaccionar al 429).
 - **`max_rate_limit_wait`** configurable en `TwitterClient` (default 60s); el wait del 429 también se capa con ese valor.

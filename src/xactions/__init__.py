@@ -14,6 +14,7 @@ from .actions import (
     delete_tweet,
     follow_user,
     like_tweet,
+    post_thread,
     post_tweet,
     retweet,
     unfollow_user,
@@ -21,7 +22,7 @@ from .actions import (
     unretweet,
     upload_media,
 )
-from .analyzer import analyze_tweets, parse_tweet_date
+from .analyzer import analyze_tweets, compare_accounts, parse_tweet_date
 from .client import (
     GRAPHQL_ENDPOINTS,
     AuthError,
@@ -62,6 +63,7 @@ from .scrapers import (
     search_tweets_sync,
     validate_cookies_sync,
 )
+from .search_query import build_search_query
 
 __all__ = [
     "__version__",
@@ -105,6 +107,7 @@ __all__ = [
     "refresh_graphql_endpoints",
     # actions
     "post_tweet",
+    "post_thread",
     "delete_tweet",
     "like_tweet",
     "unlike_tweet",
@@ -116,8 +119,10 @@ __all__ = [
     "unfollow_user",
     "upload_media",
     "bulk_unfollow",
-    # analytics / storage
+    # analytics / storage / search
     "analyze_tweets",
+    "compare_accounts",
+    "build_search_query",
     "parse_tweet_date",
     "TrackerDB",
     "compute_profile_delta",
