@@ -761,6 +761,16 @@ def history(username, limit, db_path, output):
 @with_client
 def post(client, text, reply_to, media_files):
     """Publica un tweet. Requiere auth_token."""
+    from .drafts import approval_required, create_draft
+
+    if approval_required() and not media_files:
+        draft = create_draft(
+            "post_tweet",
+            {"text": text, "reply_to_id": reply_to},
+        )
+        click.echo(f"📝 Draft saved (approval required): {draft['id']}")
+        click.echo("   Review: xactions drafts list → xactions drafts approve <id>")
+        return
 
     async def _post():
         media_ids = []
@@ -885,6 +895,12 @@ def delete(client, tweet_id):
 @with_client
 def like(client, tweet_id):
     """Da like a un tweet. Requiere auth_token."""
+    from .drafts import approval_required, create_draft
+
+    if approval_required():
+        draft = create_draft("like", {"tweet_id": tweet_id})
+        click.echo(f"📝 Draft saved: {draft['id']} — approve with: xactions drafts approve {draft['id']}")
+        return
     result = run(like_tweet(client, tweet_id))
     click.echo("✅ Like dado." if result["success"] else "❌ Error dando like.")
 
@@ -1119,6 +1135,103 @@ def doctor(cookies, cookies_file, output, as_json):
     click.echo(f"{'─'*55}\n")
     if not report["ok"]:
         sys.exit(1)
+
+
+@cli.group()
+def drafts():
+    """Review and release write drafts (approval gate)."""
+    pass
+
+
+@drafts.command("list")
+@click.option("--all", "show_all", is_flag=True, help="Include executed/discarded")
+@click.option("--output", "-o", default=None, help="JSON output file")
+def drafts_list(show_all, output):
+    from .drafts import list_drafts
+
+    items = list_drafts(status=None if show_all else "pending")
+    if output:
+        print_json({"count": len(items), "drafts": items}, output)
+        return
+    if not items:
+        click.echo("No pending drafts.")
+        return
+    click.echo(f"\n{'─'*55}\n  📝 {len(items)} draft(s)\n{'─'*55}")
+    for d in items:
+        params = json.dumps(d.get("params"), ensure_ascii=False)
+        if len(params) > 60:
+            params = params[:57] + "..."
+        click.echo(f"  {d['id']}  [{d.get('status')}]  {d.get('action')}  {params}")
+    click.echo(f"{'─'*55}\n")
+
+
+@drafts.command("approve")
+@click.argument("draft_id")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None)
+@click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
+def drafts_approve(draft_id, cookies, cookies_file, from_browser):
+    """Mark draft approved and execute it now."""
+    from .actions import (
+        create_bookmark,
+        delete_tweet,
+        follow_user,
+        like_tweet,
+        post_tweet,
+        unfollow_user,
+        unlike_tweet,
+    )
+    from .drafts import approve as approve_draft
+    from .drafts import load_draft, mark_executed
+
+    draft = load_draft(draft_id)
+    if not draft:
+        raise click.ClickException(f"Draft not found: {draft_id}")
+    if draft.get("status") != "pending":
+        raise click.ClickException(f"Draft {draft_id} is {draft.get('status')}, not pending")
+
+    approve_draft(draft_id)
+    action = draft.get("action")
+    params = draft.get("params") or {}
+    client = get_client(cookies, cookies_file, from_browser=from_browser)
+    try:
+        if action == "post_tweet":
+            result = run(post_tweet(client, **params))
+        elif action == "like":
+            result = run(like_tweet(client, **params))
+        elif action == "unlike":
+            result = run(unlike_tweet(client, **params))
+        elif action == "delete":
+            result = run(delete_tweet(client, **params))
+        elif action == "follow":
+            user_id = params.get("user_id") or run(get_user_id(client, params["username"]))
+            result = run(follow_user(client, user_id))
+        elif action == "unfollow":
+            user_id = params.get("user_id") or run(get_user_id(client, params["username"]))
+            result = run(unfollow_user(client, user_id))
+        elif action == "bookmark":
+            result = run(create_bookmark(client, **params))
+        else:
+            raise click.ClickException(f"Unknown draft action: {action}")
+        mark_executed(draft_id, result)
+        if result.get("success"):
+            click.echo(f"✅ Draft {draft_id} executed ({action}).")
+        else:
+            click.echo(f"❌ Draft {draft_id} failed: {result}", err=True)
+            sys.exit(1)
+    finally:
+        run(client.aclose())
+
+
+@drafts.command("discard")
+@click.argument("draft_id")
+def drafts_discard(draft_id):
+    from .drafts import discard
+
+    d = discard(draft_id)
+    if not d:
+        raise click.ClickException(f"Draft not found: {draft_id}")
+    click.echo(f"🗑️  Draft {draft_id} discarded.")
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
