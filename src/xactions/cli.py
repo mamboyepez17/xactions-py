@@ -1214,6 +1214,32 @@ def report(client, target, target_b, limit, fmt, out_path):
         click.echo(content)
 
 
+@cli.command()
+@click.argument("pipeline_file", type=click.Path(exists=True))
+@click.option("--execute", is_flag=True, help="Allow write steps (like); default is dry-run")
+@click.option("--output", "-o", default=None, help="JSON result file")
+@click.option("--cookies", envvar=COOKIES_ENV, default="")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None)
+@click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
+@with_client
+def pipeline(client, pipeline_file, execute, output, cookies, cookies_file, from_browser):
+    """Run a declarative JSON pipeline (search → filter → notify/report/like)."""
+    from .pipeline import run_pipeline
+
+    result = run(run_pipeline(client, pipeline_file, dry_run=not execute))
+    # drop full tweet dump from CLI JSON unless requested via file
+    payload = {k: v for k, v in result.items() if k != "tweets"}
+    payload["tweet_count"] = len(result.get("tweets") or [])
+    if output:
+        print_json(payload, output)
+        return
+    click.echo(f"Pipeline {payload.get('name')}: {payload['tweet_count']} tweets after steps")
+    for entry in payload.get("log") or []:
+        click.echo(f"  {entry}")
+    if result.get("dry_run"):
+        click.echo("(dry-run: write steps skipped — use --execute to run likes)")
+
+
 # ─── GraphQL endpoints ────────────────────────────────────────────────────────
 
 @cli.command("gql-status")
