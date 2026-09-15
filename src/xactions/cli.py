@@ -1219,6 +1219,128 @@ def report(client, target, target_b, limit, fmt, out_path):
 
 
 @cli.command()
+@click.argument("query", required=False, default="")
+@click.option("--file", "file_path", type=click.Path(exists=True), default=None, help="JSON list of tweets")
+@click.option("--limit", "-l", default=30, show_default=True)
+@click.option("--output", "-o", default=None)
+@click.option("--cookies", envvar=COOKIES_ENV, default="")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None)
+@click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
+@with_client
+def sentiment(client, query, file_path, limit, output):
+    """Score sentiment of a search query or a JSON tweet file (lightweight lexicon)."""
+    from .sentiment import score_tweets, summarize_sentiment
+
+    if file_path:
+        data = json.loads(open(file_path, encoding="utf-8").read())
+        tweets = data if isinstance(data, list) else data.get("tweets") or []
+    elif query:
+        tweets = run(search_tweets(client, query, limit=limit, mode="Latest"))
+    else:
+        raise click.ClickException("Pass a search query or --file tweets.json")
+
+    scored = score_tweets(tweets)
+    summary = summarize_sentiment(scored)
+    payload = {"summary": summary, "tweets": scored}
+    if output:
+        print_json(payload, output)
+        return
+    s = summary
+    click.echo(
+        f"Sentiment n={s['count']} avg={s['avg_score']:+.3f} "
+        f"pos={s['positive']} neu={s['neutral']} neg={s['negative']}"
+    )
+    for t in scored[:10]:
+        sent = t["sentiment"]
+        click.echo(f"  [{sent['label'][:3]} {sent['score']:+.2f}] {(t.get('text') or '')[:70]}")
+
+
+@cli.command()
+@click.argument("query")
+@click.option("--like", is_flag=True, help="Like matching tweets")
+@click.option("--retweet", is_flag=True, help="Retweet matching tweets")
+@click.option("--limit", "-l", default=10, show_default=True, help="Max tweets to consider")
+@click.option("--delay", default=3.0, show_default=True, help="Seconds between write actions")
+@click.option("--min-likes", type=int, default=None, help="Skip tweets below this like count")
+@click.option("--dry-run", is_flag=True, default=True, help="Preview only (default)")
+@click.option("--execute", is_flag=True, help="Actually perform likes/RTs (uses daily caps)")
+@click.option("--cookies", envvar=COOKIES_ENV, default="")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None)
+@click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
+@with_client
+def engage(client, query, like, retweet, limit, delay, min_likes, dry_run, execute):
+    """
+    Engage with search results (like / retweet) with delay and daily caps.
+
+    Always preview with --dry-run; add --execute to write.
+    """
+    from .actions import like_tweet
+    from .actions import retweet as rt_action
+    from .caps import WriteCapExceeded
+    from .scrapers import search_tweets
+
+    if not like and not retweet:
+        raise click.ClickException("Pass --like and/or --retweet")
+    if execute:
+        dry_run = False
+
+    tweets = run(search_tweets(client, query, limit=limit, mode="Latest"))
+    if min_likes is not None:
+        tweets = [t for t in tweets if (t.get("likes") or 0) >= min_likes]
+
+    click.echo(f"Found {len(tweets)} tweets for “{query}”")
+    planned = []
+    for t in tweets:
+        planned.append(
+            {
+                "id": t.get("id"),
+                "like": like,
+                "retweet": retweet,
+                "likes": t.get("likes"),
+                "text": (t.get("text") or "")[:60],
+            }
+        )
+
+    if dry_run:
+        click.echo("🔍 DRY-RUN — nothing will be written. Use --execute to run.")
+        for p in planned:
+            acts = "+".join([a for a, on in (("like", p["like"]), ("rt", p["retweet"])) if on])
+            click.echo(f"  [{acts}] {p['id']} ❤{p['likes']} {p['text']}")
+        return
+
+    done = {"like": 0, "retweet": 0, "skipped": 0, "failed": 0}
+    import time as _time
+
+    for p in planned:
+        tid = p["id"]
+        if not tid:
+            continue
+        try:
+            if p["like"]:
+                r = run(like_tweet(client, str(tid)))
+                if r.get("success"):
+                    done["like"] += 1
+                else:
+                    done["failed"] += 1
+                _time.sleep(delay)
+            if p["retweet"]:
+                r = run(rt_action(client, str(tid)))
+                if r.get("success"):
+                    done["retweet"] += 1
+                else:
+                    done["failed"] += 1
+                _time.sleep(delay)
+        except WriteCapExceeded as e:
+            click.echo(f"🛑 Cap reached: {e}", err=True)
+            done["skipped"] += 1
+            break
+    click.echo(
+        f"Engage done: likes={done['like']} rts={done['retweet']} "
+        f"failed={done['failed']} stopped_cap={done['skipped']}"
+    )
+
+
+@cli.command()
 @click.argument("pipeline_file", type=click.Path(exists=True))
 @click.option("--execute", is_flag=True, help="Allow write steps (like); default is dry-run")
 @click.option("--output", "-o", default=None, help="JSON result file")

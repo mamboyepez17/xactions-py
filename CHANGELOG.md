@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.8.0 — 2026-09-10
+
+### Added
+- **Lightweight sentiment** (`xactions.sentiment`): bilingual EN/ES lexicon, `xactions sentiment QUERY|--file tweets.json`.
+- **`xactions engage`**: like/retweet from search with `--dry-run` (default), `--execute`, `--delay`, `--min-likes`; respects daily write caps.
+- **README rewrite**: full feature reference for v1.5–v1.8 (CLI, API, MCP, pipelines, safety).
+
+### Tests
+- **158 passing** (+10 since v1.7.0).
+
 ## v1.7.0 — 2026-09-10
 
 ### Added
