@@ -102,7 +102,7 @@ def render_compare_report_md(
         "",
         f"_Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_",
         "",
-        "| Metric | @%s | @%s |" % (a.get("username"), b.get("username")),
+        f"| Metric | @{a.get('username')} | @{b.get('username')} |",
         "|---|---:|---:|",
         f"| Followers | {_fmt_int(a.get('followers'))} | {_fmt_int(b.get('followers'))} |",
         f"| Avg likes | {_fmt_int((a.get('averages') or {}).get('likes'))} | {_fmt_int((b.get('averages') or {}).get('likes'))} |",
