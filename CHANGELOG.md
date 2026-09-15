@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.7.0 — 2026-09-10
+
+### Added
+- **`xactions report`**: Markdown/HTML engagement report for one account or a compare of two.
+- **Declarative pipeline**: `xactions pipeline file.json` — steps `search` / `profile_tweets` / `filter` / `notify` / `report` / `print` / `like` (writes only with `--execute`).
+- **Notify / webhook**: `XACTIONS_WEBHOOK_URL` POSTs JSON on watch/pipeline alerts (`notify.py`).
+- **MCP tool groups**: `XACTIONS_MCP_TOOLS=read,analytics` / `XACTIONS_MCP_TOOLS_EXCLUDE=write` filter advertised tools at server start.
+
+### Tests
+- **148 passing** (+26 since v1.6.0).
+
 ## v1.6.0 — 2026-09-10
 
 ### Added

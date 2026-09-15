@@ -7,7 +7,7 @@ No npm. No Puppeteer. Just `httpx` + Twitter/X internal GraphQL API.
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/deps-3-brightgreen?style=flat-square)
 ![npm free](https://img.shields.io/badge/npm-free-red?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-122%20passing-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-148%20passing-brightgreen?style=flat-square)
 ![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?style=flat-square)
 
 ---
@@ -26,6 +26,13 @@ The original XActions is great but depends on npm, which has been the target of 
 | CLI | ✅ | ✅ |
 
 ---
+
+## What's new in v1.7.0
+
+- **📊 `xactions report`** — Markdown/HTML report for a profile or A/B compare
+- **⚙️ `xactions pipeline`** — JSON pipelines (search → filter → notify/report/like)
+- **🔔 Webhook notify** — `XACTIONS_WEBHOOK_URL` on watch/pipeline hits
+- **🎛️ MCP tool groups** — `XACTIONS_MCP_TOOLS=read,analytics`
 
 ## What's new in v1.6.0
 

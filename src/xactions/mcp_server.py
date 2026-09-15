@@ -654,4 +654,8 @@ async def x_discard_draft(draft_id: str) -> str:
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    from .mcp_groups import apply_env_filter_to_mcp
+
+    kept = apply_env_filter_to_mcp(mcp)
+    logging.getLogger(__name__).info("MCP tools advertised: %d", len(kept))
     mcp.run(transport="stdio")
