@@ -19,7 +19,7 @@ def test_load_rejects_bad_steps():
     with pytest.raises(ValueError):
         load_pipeline({"steps": [{"type": "nope"}]})
     with pytest.raises(ValueError):
-        load_pipeline("no-steps-key")
+        load_pipeline({"name": "x"})
 
 
 def test_load_from_file(tmp_path: Path):
@@ -37,7 +37,7 @@ def test_apply_filter_rules():
         {"id": "4", "likes": 100, "retweets": 2, "is_retweet": False, "is_reply": False, "lang": "en", "text": "other"},
     ]
     out = apply_filter(tweets, {"min_likes": 10, "exclude_retweets": True, "exclude_replies": True})
-    assert [t["id"] for t in out] == ["1"]
+    assert [t["id"] for t in out] == ["1", "4"]
     out2 = apply_filter(tweets, {"lang": "en"})
     assert [t["id"] for t in out2] == ["2", "4"]
     out3 = apply_filter(tweets, {"contains": "crypto"})
