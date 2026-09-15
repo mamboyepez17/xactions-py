@@ -1043,14 +1043,18 @@ def validate(client):
 @with_client
 def watch(client, query, limit, mode, loop_interval, max_polls, output, csv_path, ndjson_path, table):
     """Poll a search and print only new tweets (delta)."""
+    from .notify import format_tweet_alert, make_notifier
     from .watch import watch_search_once
 
+    notify = make_notifier()
     polls = 0
     while True:
         result = run(watch_search_once(client, query, limit=limit, mode=mode))
         polls += 1
         new = result["new_tweets"]
         if new:
+            alert = format_tweet_alert(new, query)
+            notify(alert)
             _handle_output(
                 {"query": query, "new_count": result["new_count"], "tweets": new},
                 output, csv_path, ndjson_path,

@@ -95,8 +95,12 @@ async def run_pipeline(
     notify_fn(message: str) optional; default logs.
     """
     from .actions import like_tweet
+    from .notify import make_notifier
     from .report import render_account_report_md
     from .scrapers import scrape_profile, scrape_tweets, search_tweets
+
+    if notify_fn is None:
+        notify_fn = make_notifier()
 
     pipe = load_pipeline(pipeline)
     tweets: list[dict[str, Any]] = []
