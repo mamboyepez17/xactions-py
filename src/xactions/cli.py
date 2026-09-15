@@ -1043,14 +1043,18 @@ def validate(client):
 @with_client
 def watch(client, query, limit, mode, loop_interval, max_polls, output, csv_path, ndjson_path, table):
     """Poll a search and print only new tweets (delta)."""
+    from .notify import format_tweet_alert, make_notifier
     from .watch import watch_search_once
 
+    notify = make_notifier()
     polls = 0
     while True:
         result = run(watch_search_once(client, query, limit=limit, mode=mode))
         polls += 1
         new = result["new_tweets"]
         if new:
+            alert = format_tweet_alert(new, query)
+            notify(alert)
             _handle_output(
                 {"query": query, "new_count": result["new_count"], "tweets": new},
                 output, csv_path, ndjson_path,
@@ -1151,6 +1155,93 @@ def unfollowers_cmd(client, username, limit, do_save, output):
         click.echo(f"  - {uid}")
     if report["unfollowed_count"] > 20:
         click.echo(f"  … and {report['unfollowed_count'] - 20} more")
+
+
+@cli.command()
+@click.argument("target")
+@click.argument("target_b", required=False)
+@click.option("--limit", "-l", default=50, show_default=True, help="Tweets to sample")
+@click.option("--format", "fmt", type=click.Choice(["md", "html"]), default="md")
+@click.option("--out", "out_path", default=None, help="Write report to file (default stdout)")
+@click.option("--cookies", envvar=COOKIES_ENV, default="")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None)
+@click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
+@with_client
+def report(client, target, target_b, limit, fmt, out_path):
+    """
+    Generate a shareable engagement report.
+
+    xactions report USERNAME
+    xactions report USER_A USER_B --format html --out compare.html
+    """
+    from .report import (
+        render_account_report_html,
+        render_account_report_md,
+        render_compare_report_html,
+        render_compare_report_md,
+    )
+
+    if target_b:
+        async def _cmp():
+            return await asyncio.gather(
+                scrape_profile(client, target),
+                scrape_tweets(client, target, limit=limit),
+                scrape_profile(client, target_b),
+                scrape_tweets(client, target_b, limit=limit),
+            )
+
+        pa, ta, pb, tb = run(_cmp())
+        content = (
+            render_compare_report_html(pa, ta, pb, tb)
+            if fmt == "html"
+            else render_compare_report_md(pa, ta, pb, tb)
+        )
+    else:
+        async def _one():
+            return await asyncio.gather(
+                scrape_profile(client, target),
+                scrape_tweets(client, target, limit=limit),
+            )
+
+        prof, tw = run(_one())
+        content = (
+            render_account_report_html(prof, tw)
+            if fmt == "html"
+            else render_account_report_md(prof, tw)
+        )
+
+    if out_path:
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        click.echo(f"✅ Report written to {out_path}")
+    else:
+        click.echo(content)
+
+
+@cli.command()
+@click.argument("pipeline_file", type=click.Path(exists=True))
+@click.option("--execute", is_flag=True, help="Allow write steps (like); default is dry-run")
+@click.option("--output", "-o", default=None, help="JSON result file")
+@click.option("--cookies", envvar=COOKIES_ENV, default="")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None)
+@click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
+@with_client
+def pipeline(client, pipeline_file, execute, output, cookies, cookies_file, from_browser):
+    """Run a declarative JSON pipeline (search → filter → notify/report/like)."""
+    from .pipeline import run_pipeline
+
+    result = run(run_pipeline(client, pipeline_file, dry_run=not execute))
+    # drop full tweet dump from CLI JSON unless requested via file
+    payload = {k: v for k, v in result.items() if k != "tweets"}
+    payload["tweet_count"] = len(result.get("tweets") or [])
+    if output:
+        print_json(payload, output)
+        return
+    click.echo(f"Pipeline {payload.get('name')}: {payload['tweet_count']} tweets after steps")
+    for entry in payload.get("log") or []:
+        click.echo(f"  {entry}")
+    if result.get("dry_run"):
+        click.echo("(dry-run: write steps skipped — use --execute to run likes)")
 
 
 # ─── GraphQL endpoints ────────────────────────────────────────────────────────
