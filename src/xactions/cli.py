@@ -1153,6 +1153,67 @@ def unfollowers_cmd(client, username, limit, do_save, output):
         click.echo(f"  … and {report['unfollowed_count'] - 20} more")
 
 
+@cli.command()
+@click.argument("target")
+@click.argument("target_b", required=False)
+@click.option("--limit", "-l", default=50, show_default=True, help="Tweets to sample")
+@click.option("--format", "fmt", type=click.Choice(["md", "html"]), default="md")
+@click.option("--out", "out_path", default=None, help="Write report to file (default stdout)")
+@click.option("--cookies", envvar=COOKIES_ENV, default="")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None)
+@click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
+@with_client
+def report(client, target, target_b, limit, fmt, out_path):
+    """
+    Generate a shareable engagement report.
+
+    xactions report USERNAME
+    xactions report USER_A USER_B --format html --out compare.html
+    """
+    from .report import (
+        render_account_report_html,
+        render_account_report_md,
+        render_compare_report_html,
+        render_compare_report_md,
+    )
+
+    if target_b:
+        async def _cmp():
+            return await asyncio.gather(
+                scrape_profile(client, target),
+                scrape_tweets(client, target, limit=limit),
+                scrape_profile(client, target_b),
+                scrape_tweets(client, target_b, limit=limit),
+            )
+
+        pa, ta, pb, tb = run(_cmp())
+        content = (
+            render_compare_report_html(pa, ta, pb, tb)
+            if fmt == "html"
+            else render_compare_report_md(pa, ta, pb, tb)
+        )
+    else:
+        async def _one():
+            return await asyncio.gather(
+                scrape_profile(client, target),
+                scrape_tweets(client, target, limit=limit),
+            )
+
+        prof, tw = run(_one())
+        content = (
+            render_account_report_html(prof, tw)
+            if fmt == "html"
+            else render_account_report_md(prof, tw)
+        )
+
+    if out_path:
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        click.echo(f"✅ Report written to {out_path}")
+    else:
+        click.echo(content)
+
+
 # ─── GraphQL endpoints ────────────────────────────────────────────────────────
 
 @cli.command("gql-status")
