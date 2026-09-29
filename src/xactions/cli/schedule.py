@@ -8,7 +8,7 @@ import click
 
 from ..schedule import ScheduleStore, parse_when, run_due
 from ._app import cli
-from ._common import COOKIES_ENV, get_client, print_json, run
+from ._common import COOKIES_ENV, export_options, export_rows, get_client, print_json, run
 
 
 @cli.group()
@@ -36,9 +36,12 @@ def schedule_add(text, when, reply_to, db_path):
 @click.option("--all", "show_all", is_flag=True, help="Include posted, failed and cancelled posts")
 @click.option("--db", "db_path", default=None, help="SQLite database path")
 @click.option("--output", "-o", default=None, help="Output JSON file")
-def schedule_list(show_all, db_path, output):
+@export_options
+def schedule_list(show_all, db_path, output, csv_path, ndjson_path):
     """List scheduled posts (pending only unless --all)."""
     items = ScheduleStore(db_path).list_posts(status=None if show_all else "pending")
+    if export_rows(items, csv_path, ndjson_path):
+        return
     if output:
         print_json({"count": len(items), "scheduled": items}, output)
         return

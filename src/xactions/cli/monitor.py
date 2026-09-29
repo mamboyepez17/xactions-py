@@ -14,6 +14,8 @@ from ._common import (
     _flatten_tweets,
     _handle_output,
     common_options,
+    export_options,
+    export_rows,
     print_json,
     print_tweets_table,
     run,
@@ -106,11 +108,12 @@ def snapshot_followers(client, username, limit):
 @click.option("--limit", "-l", default=200, show_default=True)
 @click.option("--save", "do_save", is_flag=True, help="Also save this run as new snapshot")
 @click.option("--output", "-o", default=None)
+@export_options
 @click.option("--cookies", envvar=COOKIES_ENV, default="")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None)
 @click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
 @with_client
-def unfollowers_cmd(client, username, limit, do_save, output):
+def unfollowers_cmd(client, username, limit, do_save, output, csv_path, ndjson_path):
     """Diff current followers vs last snapshot (who unfollowed)."""
     from ..media import diff_followers, load_follower_snapshot, save_follower_snapshot
 
@@ -132,6 +135,11 @@ def unfollowers_cmd(client, username, limit, do_save, output):
     }
     if do_save:
         save_follower_snapshot(username, ids)
+    rows = [{"user_id": uid, "change": "unfollowed"} for uid in diff["unfollowed"]] + [
+        {"user_id": uid, "change": "new_follower"} for uid in diff["new_followers"]
+    ]
+    if export_rows(rows, csv_path, ndjson_path):
+        return
     if output:
         print_json(report, output)
         return

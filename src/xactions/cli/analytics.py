@@ -19,6 +19,9 @@ from ..scrapers import (
 from ._app import cli
 from ._common import (
     COOKIES_ENV,
+    _flatten_tweets,
+    export_options,
+    export_rows,
     print_analysis,
     print_json,
     run,
@@ -29,7 +32,7 @@ from ._common import (
 
 @cli.command()
 @click.argument("username")
-@click.option("--limit", "-l", default=100, show_default=True, help="Tweets a analizar")
+@click.option("--limit", "-l", default=100, show_default=True, help="Tweets to analyze")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @click.option("--output", "-o", default=None, help="Output JSON file")
@@ -55,7 +58,7 @@ def analyze(client, username, limit, output):
 
 @cli.command()
 @click.argument("username")
-@click.option("--limit", "-l", default=50, show_default=True, help="Tweets a trackear")
+@click.option("--limit", "-l", default=50, show_default=True, help="Tweets to snapshot")
 @click.option("--db", "db_path", default=None, help="SQLite database path (default ~/.xactions/xactions.db)")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
@@ -90,15 +93,18 @@ def track(client, username, limit, db_path):
 
 @cli.command()
 @click.argument("username")
-@click.option("--limit", "-l", default=30, show_default=True, help="Snapshots a mostrar")
+@click.option("--limit", "-l", default=30, show_default=True, help="Snapshots to show")
 @click.option("--db", "db_path", default=None, help="SQLite database path")
 @click.option("--output", "-o", default=None, help="Output JSON file")
-def history(username, limit, db_path, output):
+@export_options
+def history(username, limit, db_path, output, csv_path, ndjson_path):
     """Show the snapshot history of a tracked user."""
     try:
         db = TrackerDB(db_path)
         rows = db.get_profile_history(username, limit=limit)
 
+        if export_rows(rows, csv_path, ndjson_path):
+            return
         if output:
             print_json({"username": username, "count": len(rows), "history": rows}, output)
             return
@@ -129,8 +135,9 @@ def history(username, limit, db_path, output):
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @click.option("--table", is_flag=True, help="Show as a table")
+@export_options
 @with_client
-def compare(client, user_a, user_b, limit, output, table):
+def compare(client, user_a, user_b, limit, output, table, csv_path, ndjson_path):
     """Compare two accounts: followers, engagement rate and averages."""
 
     async def _collect():
@@ -145,6 +152,21 @@ def compare(client, user_a, user_b, limit, output, table):
     prof_a, tw_a, prof_b, tw_b = run(_collect())
     report = compare_accounts(prof_a, tw_a, prof_b, tw_b)
 
+    rows = [
+        {
+            "username": side.get("username"),
+            "followers": side.get("followers"),
+            "following": side.get("following"),
+            "tweets_count": side.get("tweets_count"),
+            "avg_likes": (side.get("averages") or {}).get("likes"),
+            "avg_retweets": (side.get("averages") or {}).get("retweets"),
+            "avg_views": (side.get("averages") or {}).get("views"),
+            "engagement_rate_followers": side.get("engagement_rate_followers"),
+        }
+        for side in (report["a"], report["b"])
+    ]
+    if export_rows(rows, csv_path, ndjson_path):
+        return
     if output:
         print_json(report, output)
         return
@@ -251,11 +273,12 @@ def report(client, target, target_b, limit, fmt, out_path, db_path, no_history):
 @click.option("--file", "file_path", type=click.Path(exists=True), default=None, help="JSON list of tweets")
 @click.option("--limit", "-l", default=30, show_default=True)
 @click.option("--output", "-o", default=None)
+@export_options
 @click.option("--cookies", envvar=COOKIES_ENV, default="")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None)
 @click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
 @with_client
-def sentiment(client, query, file_path, limit, output):
+def sentiment(client, query, file_path, limit, output, csv_path, ndjson_path):
     """Score sentiment of a search query or a JSON tweet file (lightweight lexicon)."""
     from ..sentiment import score_tweets, summarize_sentiment
 
@@ -270,6 +293,12 @@ def sentiment(client, query, file_path, limit, output):
     scored = score_tweets(tweets)
     summary = summarize_sentiment(scored)
     payload = {"summary": summary, "tweets": scored}
+    rows = [
+        {**flat, "sentiment_label": t["sentiment"]["label"], "sentiment_score": t["sentiment"]["score"]}
+        for t, flat in zip(scored, _flatten_tweets(scored))
+    ]
+    if export_rows(rows, csv_path, ndjson_path):
+        return
     if output:
         print_json(payload, output)
         return

@@ -144,9 +144,10 @@ def _write_csv(path: str, rows: list[dict[str, Any]], fieldnames: list[str] | No
         click.echo("⚠️  No data to export to CSV.")
         return
     if fieldnames is None:
-        fieldnames = list(rows[0].keys())
+        # Union of keys in first-seen order: rows don't always share a shape.
+        fieldnames = list(dict.fromkeys(k for row in rows for k in row))
     with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, restval="")
         writer.writeheader()
         writer.writerows(rows)
     click.echo(f"✅ CSV saved to {path}")
@@ -293,6 +294,22 @@ def print_analysis(report: dict[str, Any], username: str):
         for t in report["top_tweets"]:
             click.echo(f"    [{t['score']:>6}] ❤{t['likes'] or 0:<6} {(t['text'] or '')[:60]}")
     click.echo(f"{'═'*55}\n")
+
+
+def export_options(fn):
+    """--csv / --ndjson for commands whose result is a list of rows."""
+    fn = click.option("--csv", "csv_path", default=None, help="Output CSV file")(fn)
+    fn = click.option("--ndjson", "ndjson_path", default=None, help="Output NDJSON file")(fn)
+    return fn
+
+
+def export_rows(rows: list[dict[str, Any]], csv_path: str | None, ndjson_path: str | None) -> bool:
+    """Write rows to --csv/--ndjson if requested. True when something was exported."""
+    if csv_path:
+        _write_csv(csv_path, rows)
+    if ndjson_path:
+        _write_ndjson(ndjson_path, rows)
+    return bool(csv_path or ndjson_path)
 
 
 def common_options(fn):

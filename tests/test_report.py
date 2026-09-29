@@ -88,7 +88,6 @@ def test_cli_report_registered():
 
 from xactions.report import (  # noqa: E402
     _nice_ticks,
-    render_account_report_html,
     render_follower_chart_svg,
 )
 

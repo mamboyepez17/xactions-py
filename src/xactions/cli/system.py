@@ -11,6 +11,8 @@ from ._app import cli
 from ._common import (
     COOKIES_ENV,
     _load_cookies_list,
+    export_options,
+    export_rows,
     get_client,
     print_json,
     run,
@@ -180,10 +182,15 @@ def drafts():
 @drafts.command("list")
 @click.option("--all", "show_all", is_flag=True, help="Include executed/discarded")
 @click.option("--output", "-o", default=None, help="JSON output file")
-def drafts_list(show_all, output):
+@export_options
+def drafts_list(show_all, output, csv_path, ndjson_path):
+    """List write drafts (pending only unless --all)."""
     from ..drafts import list_drafts
 
     items = list_drafts(status=None if show_all else "pending")
+    rows = [{**d, "params": json.dumps(d.get("params") or {}, ensure_ascii=False)} for d in items]
+    if export_rows(rows, csv_path, ndjson_path):
+        return
     if output:
         print_json({"count": len(items), "drafts": items}, output)
         return
