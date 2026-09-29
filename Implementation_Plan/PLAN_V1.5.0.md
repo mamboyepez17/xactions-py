@@ -1,9 +1,9 @@
 # xactions-py — Plan de Implementación v1.5.0
 
-> **Versión:** 1.0.0  
-> **Fecha:** 2026-08-17  
-> **Rama:** `feature/v1.5.0`  
-> **Base:** v1.4.0 (`aad0c14`)  
+> **Versión:** 1.0.0
+> **Fecha:** 2026-08-17
+> **Rama:** `feature/v1.5.0`
+> **Base:** v1.4.0 (`aad0c14`)
 > **Objetivo:** Endurecer el toolkit (packaging, GraphQL, seguridad) y añadir features de alto valor sin romper la API actual.
 
 ---

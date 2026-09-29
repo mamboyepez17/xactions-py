@@ -6,8 +6,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/deps-3-brightgreen?style=flat-square)
 ![npm free](https://img.shields.io/badge/npm-free-red?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-158%20passing-brightgreen?style=flat-square)
-![CI](https://img.shields.io/badge/CI-GitHub%20Actions-blue?style=flat-square)
+[![CI](https://github.com/mamboyepez17/xactions-py/actions/workflows/ci.yml/badge.svg)](https://github.com/mamboyepez17/xactions-py/actions/workflows/ci.yml)
 
 ---
 

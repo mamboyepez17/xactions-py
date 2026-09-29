@@ -1,7 +1,7 @@
 # xactions-py — Implementation Plan v1.7.0
 
-> **Branch:** `feature/v1.7.0`  
-> **Base:** v1.6.0 (`ef13d31`)  
+> **Branch:** `feature/v1.7.0`
+> **Base:** v1.6.0 (`ef13d31`)
 > **Mode:** Autonomous — each block advances only when its tests pass.
 
 Innovation without TrendScope / without cloning the JS platform.

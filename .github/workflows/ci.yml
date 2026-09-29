@@ -36,4 +36,4 @@ jobs:
       - name: Run tests
         env:
           XACTIONS_NO_GQL_REFRESH: "1"
-        run: pytest tests -v
+        run: pytest tests -v --cov --cov-report=term
