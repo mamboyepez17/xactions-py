@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import functools
+import io
 import json
 import os
 import re
@@ -37,10 +38,11 @@ load_dotenv()
 # Fix encoding para Windows (emojis, caracteres especiales)
 if sys.platform == "win32":
     for _stream in (sys.stdout, sys.stderr):
-        try:
-            _stream.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, ValueError):
-            pass
+        if isinstance(_stream, io.TextIOWrapper):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except ValueError:
+                pass
 
 from .actions import (
     bulk_unfollow,
