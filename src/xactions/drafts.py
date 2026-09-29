@@ -148,3 +148,64 @@ async def maybe_draft_or_run(
     if isinstance(result, dict):
         return {**result, "drafted": False}
     return {"success": True, "drafted": False, "result": result}
+
+
+# Draft actions that execute_draft() knows how to run.
+DRAFT_ACTIONS = frozenset(
+    {
+        "post_tweet",
+        "post_thread",
+        "like",
+        "unlike",
+        "retweet",
+        "delete",
+        "follow",
+        "unfollow",
+        "bookmark",
+        "unbookmark",
+    }
+)
+
+
+async def execute_draft(client, draft: dict[str, Any]) -> dict[str, Any]:
+    """
+    Run the write stored in `draft` against X and return the action result.
+    Raises ValueError for an unknown action. Does not change the draft status.
+    """
+    from .actions import (
+        create_bookmark,
+        delete_bookmark,
+        delete_tweet,
+        follow_user,
+        like_tweet,
+        post_thread,
+        post_tweet,
+        retweet,
+        unfollow_user,
+        unlike_tweet,
+    )
+    from .scrapers import get_user_id
+
+    action = draft.get("action")
+    params = dict(draft.get("params") or {})
+
+    if action == "post_tweet":
+        return await post_tweet(client, params["text"], reply_to_id=params.get("reply_to_id"))
+    if action == "post_thread":
+        return await post_thread(client, params["tweets"], delay_seconds=params.get("delay_seconds", 1.5))
+    if action in {"follow", "unfollow"}:
+        user_id = params.get("user_id") or await get_user_id(client, params["username"])
+        runner = follow_user if action == "follow" else unfollow_user
+        return await runner(client, user_id)
+
+    by_tweet_id = {
+        "like": like_tweet,
+        "unlike": unlike_tweet,
+        "retweet": retweet,
+        "delete": delete_tweet,
+        "bookmark": create_bookmark,
+        "unbookmark": delete_bookmark,
+    }
+    if action in by_tweet_id:
+        return await by_tweet_id[action](client, params["tweet_id"])
+    raise ValueError(f"Unknown draft action: {action}")

@@ -763,7 +763,12 @@ def post(client, text, reply_to, media_files):
     """Publica un tweet. Requiere auth_token."""
     from .drafts import approval_required, create_draft
 
-    if approval_required() and not media_files:
+    if approval_required():
+        if media_files:
+            raise click.ClickException(
+                "Approval is required (XACTIONS_REQUIRE_APPROVAL) and drafts cannot carry media yet. "
+                "Post without --media or disable approval."
+            )
         draft = create_draft(
             "post_tweet",
             {"text": text, "reply_to_id": reply_to},
@@ -1505,17 +1510,8 @@ def drafts_list(show_all, output):
 @click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
 def drafts_approve(draft_id, cookies, cookies_file, from_browser):
     """Mark draft approved and execute it now."""
-    from .actions import (
-        create_bookmark,
-        delete_tweet,
-        follow_user,
-        like_tweet,
-        post_tweet,
-        unfollow_user,
-        unlike_tweet,
-    )
     from .drafts import approve as approve_draft
-    from .drafts import load_draft, mark_executed
+    from .drafts import execute_draft, load_draft, mark_executed
 
     draft = load_draft(draft_id)
     if not draft:
@@ -1525,27 +1521,12 @@ def drafts_approve(draft_id, cookies, cookies_file, from_browser):
 
     approve_draft(draft_id)
     action = draft.get("action")
-    params = draft.get("params") or {}
     client = get_client(cookies, cookies_file, from_browser=from_browser)
     try:
-        if action == "post_tweet":
-            result = run(post_tweet(client, **params))
-        elif action == "like":
-            result = run(like_tweet(client, **params))
-        elif action == "unlike":
-            result = run(unlike_tweet(client, **params))
-        elif action == "delete":
-            result = run(delete_tweet(client, **params))
-        elif action == "follow":
-            user_id = params.get("user_id") or run(get_user_id(client, params["username"]))
-            result = run(follow_user(client, user_id))
-        elif action == "unfollow":
-            user_id = params.get("user_id") or run(get_user_id(client, params["username"]))
-            result = run(unfollow_user(client, user_id))
-        elif action == "bookmark":
-            result = run(create_bookmark(client, **params))
-        else:
-            raise click.ClickException(f"Unknown draft action: {action}")
+        try:
+            result = run(execute_draft(client, draft))
+        except ValueError as e:
+            raise click.ClickException(str(e)) from e
         mark_executed(draft_id, result)
         if result.get("success"):
             click.echo(f"✅ Draft {draft_id} executed ({action}).")

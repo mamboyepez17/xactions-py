@@ -51,6 +51,7 @@ from .client import (
     TwitterClient,
     TwitterError,
 )
+from .drafts import approval_required, create_draft
 from .pool import ClientPool
 from .scrapers import (
     get_bookmarks,
@@ -117,6 +118,21 @@ def _fmt_error(e: Exception) -> str:
     if isinstance(e, TwitterError):
         return f"🐦 Error de Twitter: {e}"
     return f"💥 Error inesperado: {type(e).__name__}: {e}"
+
+
+def _draft_if_required(action: str, params: dict) -> str | None:
+    """
+    Approval gate for write tools. When XACTIONS_REQUIRE_APPROVAL is set the
+    write is saved as a draft instead of reaching X, and the returned message
+    tells the agent that a human has to release it from the CLI.
+    """
+    if not approval_required():
+        return None
+    draft = create_draft(action, params)
+    return (
+        f"📝 Approval required: saved draft {draft['id']} ({action}); nothing was sent to X. "
+        f"A human must review and run it with: xactions drafts approve {draft['id']}"
+    )
 
 
 # ─── Herramientas MCP ─────────────────────────────────────────────────────────
@@ -390,6 +406,8 @@ async def x_post_tweet(
     reply_to_id: ID del tweet al que responder (opcional)
     """
     try:
+        if gated := _draft_if_required("post_tweet", {"text": text, "reply_to_id": reply_to_id}):
+            return gated
         client = get_client()
         result = await post_tweet(client, text, reply_to_id=reply_to_id)
         if result["success"]:
@@ -407,6 +425,8 @@ async def x_post_thread(tweets: list[str], delay: float = 1.5) -> str:
     delay: segundos entre tweets (default 1.5)
     """
     try:
+        if gated := _draft_if_required("post_thread", {"tweets": tweets, "delay_seconds": delay}):
+            return gated
         client = get_client()
         result = await post_thread(client, tweets, delay_seconds=delay)
         if result["success"]:
@@ -474,6 +494,8 @@ async def x_delete_tweet(tweet_id: str) -> str:
     tweet_id: ID numérico del tweet
     """
     try:
+        if gated := _draft_if_required("delete", {"tweet_id": tweet_id}):
+            return gated
         client = get_client()
         result = await delete_tweet(client, tweet_id)
         return "✅ Tweet eliminado." if result["success"] else "❌ No se pudo eliminar el tweet."
@@ -485,6 +507,8 @@ async def x_delete_tweet(tweet_id: str) -> str:
 async def x_like_tweet(tweet_id: str) -> str:
     """Da like a un tweet. Requiere autenticación."""
     try:
+        if gated := _draft_if_required("like", {"tweet_id": tweet_id}):
+            return gated
         result = await like_tweet(get_client(), tweet_id)
         return "✅ Like dado." if result["success"] else "❌ No se pudo dar like."
     except Exception as e:
@@ -495,6 +519,8 @@ async def x_like_tweet(tweet_id: str) -> str:
 async def x_unlike_tweet(tweet_id: str) -> str:
     """Quita el like de un tweet. Requiere autenticación."""
     try:
+        if gated := _draft_if_required("unlike", {"tweet_id": tweet_id}):
+            return gated
         result = await unlike_tweet(get_client(), tweet_id)
         return "✅ Like quitado." if result["success"] else "❌ No se pudo quitar el like."
     except Exception as e:
@@ -505,6 +531,8 @@ async def x_unlike_tweet(tweet_id: str) -> str:
 async def x_retweet(tweet_id: str) -> str:
     """Hace retweet de un tweet. Requiere autenticación."""
     try:
+        if gated := _draft_if_required("retweet", {"tweet_id": tweet_id}):
+            return gated
         result = await retweet(get_client(), tweet_id)
         return "✅ Retweet hecho." if result["success"] else "❌ No se pudo hacer retweet."
     except Exception as e:
@@ -518,6 +546,8 @@ async def x_follow_user(username: str) -> str:
     username: nombre de usuario sin @
     """
     try:
+        if gated := _draft_if_required("follow", {"username": username}):
+            return gated
         client = get_client()
         user_id = await get_user_id(client, username)
         result = await follow_user(client, user_id)
@@ -533,6 +563,8 @@ async def x_unfollow_user(username: str) -> str:
     username: nombre de usuario sin @
     """
     try:
+        if gated := _draft_if_required("unfollow", {"username": username}):
+            return gated
         client = get_client()
         user_id = await get_user_id(client, username)
         result = await unfollow_user(client, user_id)
@@ -545,6 +577,8 @@ async def x_unfollow_user(username: str) -> str:
 async def x_bookmark_tweet(tweet_id: str) -> str:
     """Agrega un tweet a bookmarks. Requiere autenticación."""
     try:
+        if gated := _draft_if_required("bookmark", {"tweet_id": tweet_id}):
+            return gated
         client = get_client()
         result = await create_bookmark(client, tweet_id)
         return "✅ Bookmark agregado." if result["success"] else "❌ No se pudo agregar bookmark."
@@ -556,6 +590,8 @@ async def x_bookmark_tweet(tweet_id: str) -> str:
 async def x_unbookmark_tweet(tweet_id: str) -> str:
     """Elimina un tweet de bookmarks. Requiere autenticación."""
     try:
+        if gated := _draft_if_required("unbookmark", {"tweet_id": tweet_id}):
+            return gated
         client = get_client()
         result = await delete_bookmark(client, tweet_id)
         return "✅ Bookmark eliminado." if result["success"] else "❌ No se pudo eliminar bookmark."
@@ -598,6 +634,18 @@ async def x_bulk_unfollow_non_followers(
                 f"  Primeros: {preview}"
             )
 
+        if approval_required():
+            ids = [
+                create_draft("unfollow", {"user_id": u["id"], "username": u.get("username")})["id"]
+                for u in non_followers
+                if u.get("id")
+            ]
+            return (
+                f"📝 Approval required: saved {len(ids)} unfollow draft(s); nothing was sent to X.\n"
+                f"  Users: {preview}\n"
+                "  A human must review them with: xactions drafts list"
+            )
+
         result = await bulk_unfollow(client, user_ids, delay_seconds=delay)
 
         return (
@@ -624,20 +672,6 @@ async def x_list_drafts(status: str = "pending") -> str:
 
 
 @mcp.tool()
-async def x_approve_draft(draft_id: str) -> str:
-    """Mark a draft as approved (does not execute; use CLI drafts approve to run)."""
-    try:
-        from .drafts import approve
-
-        d = approve(draft_id)
-        if not d:
-            return f"Draft not found: {draft_id}"
-        return f"✅ Draft {draft_id} approved. Run via: xactions drafts approve {draft_id}"
-    except Exception as e:
-        return _fmt_error(e)
-
-
-@mcp.tool()
 async def x_discard_draft(draft_id: str) -> str:
     """Discard a pending draft."""
     try:
@@ -653,9 +687,17 @@ async def x_discard_draft(draft_id: str) -> str:
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    from .mcp_groups import apply_env_filter_to_mcp
+# Applied at import time so the filter holds however the server is launched
+# (`python -m`, `mcp run`, the `xactions-mcp` script, or an embedding host).
+from .mcp_groups import apply_env_filter_to_mcp
 
-    kept = apply_env_filter_to_mcp(mcp)
-    logging.getLogger(__name__).info("MCP tools advertised: %d", len(kept))
+ADVERTISED_TOOLS = apply_env_filter_to_mcp(mcp)
+
+
+def main() -> None:
+    logging.getLogger(__name__).info("MCP tools advertised: %d", len(ADVERTISED_TOOLS))
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

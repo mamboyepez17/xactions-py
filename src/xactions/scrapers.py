@@ -292,10 +292,13 @@ async def _paginate_users(
     client: TwitterClient,
     endpoint: str,
     user_id: str,
-    limit: int = 100,
+    limit: int | None = 100,
     checkpoint_key: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Paginador generico para followers/following/favoriters/retweeters."""
+    """Paginador generico para followers/following/favoriters/retweeters.
+
+    limit=None fetches every page until the cursor is exhausted.
+    """
     from .watch import load_cursor, mark_scrape_complete, save_cursor
 
     all_users: list[dict[str, Any]] = []
@@ -305,10 +308,11 @@ async def _paginate_users(
         if cursor:
             _log.info("Resuming scrape %s from checkpoint cursor", checkpoint_key)
 
-    while len(all_users) < limit:
+    while limit is None or len(all_users) < limit:
+        page_size = PAGE_SIZE_USERS if limit is None else min(PAGE_SIZE_USERS, limit - len(all_users))
         variables: dict[str, Any] = {
             "userId": user_id,
-            "count": min(PAGE_SIZE_USERS, limit - len(all_users)),
+            "count": page_size,
             "includePromotedContent": False,
         }
         if cursor:
@@ -338,13 +342,13 @@ async def _paginate_users(
             break
         cursor = new_cursor
 
-    if checkpoint_key and len(all_users) >= limit:
+    if checkpoint_key and limit is not None and len(all_users) >= limit:
         # finished requested slice — keep cursor so next call continues
         pass
     elif checkpoint_key and not cursor:
         mark_scrape_complete(checkpoint_key)
 
-    return all_users[:limit]
+    return all_users if limit is None else all_users[:limit]
 
 
 async def get_user_id(client: TwitterClient, username: str) -> str:
@@ -382,17 +386,43 @@ async def scrape_following(
     return await _paginate_users(client, "Following", user_id, limit, checkpoint_key=key)
 
 
-async def scrape_non_followers(client: TwitterClient, username: str, limit: int = 200) -> list[dict[str, Any]]:
-    """Retorna los usuarios que sigues pero que no te siguen de vuelta.
+# Minimum fraction of the profile's follower count that must be fetched before
+# we trust the follower set (suspended/deactivated accounts are still counted
+# by X but never returned, so an exact match is not expected).
+MIN_FOLLOWER_COVERAGE = 0.9
 
-    Resuelve el user_id una sola vez y consulta followers/following en
-    paralelo, reduciendo el tiempo total aproximadamente a la mitad.
+
+async def scrape_non_followers(
+    client: TwitterClient,
+    username: str,
+    limit: int = 200,
+    min_follower_coverage: float = MIN_FOLLOWER_COVERAGE,
+) -> list[dict[str, Any]]:
+    """Return accounts `username` follows that do not follow back.
+
+    `limit` bounds how many *following* accounts are checked. The follower
+    list is always fetched in full: truncating it would report real
+    followers as non-followers (and bulk-unfollow would then drop them).
+    Raises TwitterError if the follower list comes back noticeably
+    incomplete, rather than returning a result that is unsafe to act on.
     """
-    user_id = await get_user_id(client, username)
+    profile = await scrape_profile(client, username)
+    user_id = profile.get("id")
+    if not user_id:
+        raise NotFoundError(f"Could not resolve the user ID of @{username}")
+    _USER_ID_CACHE[username.lower()] = user_id
+
     following, followers = await asyncio.gather(
         _paginate_users(client, "Following", user_id, limit),
-        _paginate_users(client, "Followers", user_id, limit),
+        _paginate_users(client, "Followers", user_id, None),
     )
+    expected = _safe_int(profile.get("followers"))
+    if expected and len(followers) < expected * min_follower_coverage:
+        raise TwitterError(
+            f"Incomplete follower list for @{username}: fetched {len(followers)} of "
+            f"{expected}. Refusing to compute non-followers (results would include "
+            "accounts that do follow back). Retry later."
+        )
     follower_ids = {u["id"] for u in followers if u.get("id")}
     return [u for u in following if u.get("id") not in follower_ids]
 

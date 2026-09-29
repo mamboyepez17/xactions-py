@@ -11,11 +11,12 @@ v1.2.0:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from collections.abc import Callable
 from typing import Any
 
-from .caps import check_write, load_caps, record_write, save_caps
+from .caps import WriteCapExceeded, check_write, load_caps, record_write, save_caps
 from .client import UPLOAD_BASE, AuthError, TwitterClient
 
 _log = logging.getLogger(__name__)
@@ -30,9 +31,17 @@ def _require_auth(client: TwitterClient) -> None:
 
 
 def _account_key(client: Any) -> str:
+    """
+    Stable, non-reversible per-account key for the on-disk write caps.
+
+    Must be identical across processes (the builtin hash() is salted per
+    process), and a ClientPool is keyed by the account currently in use.
+    """
+    client = getattr(client, "current", client)
     cookies = getattr(client, "_cookies", None) or {}
-    token = cookies.get("auth_token") or getattr(client, "_cookie_str", "")[:20]
-    return f"acct:{hash(token) & 0xFFFFFFFF:08x}"
+    token = cookies.get("auth_token") or getattr(client, "_cookie_str", "") or ""
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return f"acct:{digest[:16]}"
 
 
 def _before_write(client: Any, operation: str) -> None:
@@ -299,6 +308,7 @@ async def bulk_unfollow(
     _require_auth(client)
     success = 0
     failed = 0
+    stopped: str | None = None
 
     for i, uid in enumerate(user_ids):
         try:
@@ -307,6 +317,11 @@ async def bulk_unfollow(
                 success += 1
             else:
                 failed += 1
+        except (WriteCapExceeded, AuthError) as e:
+            # Every remaining unfollow would fail the same way: stop now.
+            _log.warning("bulk_unfollow: stopping at %d/%d (%s)", i, len(user_ids), e)
+            stopped = str(e)
+            break
         except Exception as e:
             failed += 1
             _log.warning("bulk_unfollow: falló user_id=%s (%s)", uid, e)
@@ -320,4 +335,5 @@ async def bulk_unfollow(
         "total": len(user_ids),
         "success": success,
         "failed": failed,
+        "stopped": stopped,
     }

@@ -238,7 +238,11 @@ export XACTIONS_MCP_TOOLS_EXCLUDE=write
 | read | `x_get_profile`, `x_search_tweets`, `x_get_followers`, … |
 | write | `x_post_tweet`, `x_post_thread`, `x_like_tweet`, `x_follow_user`, … |
 | analytics | `x_analyze_user`, `x_compare_accounts`, `x_build_search_query` |
-| drafts | `x_list_drafts`, `x_approve_draft`, `x_discard_draft` |
+| drafts | `x_list_drafts`, `x_discard_draft` |
+
+With `XACTIONS_REQUIRE_APPROVAL=1`, every MCP write tool (including `x_bulk_unfollow_non_followers`) saves a draft instead of hitting X. Drafts can only be released by a human with `xactions drafts approve <id>` — the MCP server deliberately has no approve tool.
+
+The tool-group filter is applied when the server module is imported, so it holds for `python -m xactions.mcp_server`, the `xactions-mcp` script and `mcp run`. If a filter is set but cannot be applied, the server refuses to start.
 
 Compatible with **mcp 2.x** (`MCPServer`) and **1.x** (`FastMCP`).
 

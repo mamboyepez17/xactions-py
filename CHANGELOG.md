@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Daily write caps now persist across runs.** The per-account key used Python's per-process salted `hash()`, so every CLI/MCP run started from zero. It is now a SHA-256 of the auth token, and `ClientPool` is keyed by the account in use.
+- **`bulk_unfollow` stops** on `WriteCapExceeded` / `AuthError` instead of sleeping through the rest of the list (result gains a `stopped` field).
+- **Non-followers no longer include real followers.** `scrape_non_followers` truncated the follower list to `limit`, so accounts with more followers than `limit` had real followers reported (and bulk-unfollowed). The follower list is now fetched in full, and an incomplete list (< 90% of the profile count) raises instead of returning unsafe results.
+- **MCP approval gate is enforced.** With `XACTIONS_REQUIRE_APPROVAL=1` all MCP write tools save drafts instead of writing. `x_approve_draft` was removed so an agent cannot approve its own drafts.
+- **MCP tool filter fails closed** and is applied at import time (not only under `python -m`).
+- `xactions post --media` no longer bypasses the approval gate.
+
+### Added
+- `xactions-mcp` console script.
+- `drafts.execute_draft()` shared executor (adds `retweet`, `unbookmark`, `post_thread` drafts).
+
 ## v1.8.0 — 2026-09-10
 
 ### Added

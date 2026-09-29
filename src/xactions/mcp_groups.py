@@ -31,7 +31,6 @@ TOOL_PREFIX_GROUPS: list[tuple[str, str]] = [
     ("x_unbookmark_", "write"),
     ("x_bulk_", "write"),
     ("x_list_drafts", "drafts"),
-    ("x_approve_draft", "drafts"),
     ("x_discard_draft", "drafts"),
 ]
 
@@ -81,22 +80,34 @@ def apply_env_filter_to_mcp(mcp) -> list[str]:
     """
     Remove tools from an MCPServer/FastMCP instance based on env vars.
     Returns the list of tool names kept.
+
+    Fails closed: if a filter is configured but the tool registry cannot be
+    found (e.g. the mcp SDK changed its internals), raise instead of silently
+    advertising every tool, write tools included.
     """
     include = os.getenv("XACTIONS_MCP_TOOLS")
     exclude = os.getenv("XACTIONS_MCP_TOOLS_EXCLUDE")
-    if not include and not exclude:
-        return sorted(getattr(getattr(mcp, "_tool_manager", None), "_tools", {}) or {})
-
     tm = getattr(mcp, "_tool_manager", None)
     tools = getattr(tm, "_tools", None)
+    if not include and not exclude:
+        return sorted(tools or {}) if isinstance(tools, dict) else []
+
     if not isinstance(tools, dict):
-        return []
+        raise RuntimeError(
+            "XACTIONS_MCP_TOOLS / XACTIONS_MCP_TOOLS_EXCLUDE is set but the MCP tool registry "
+            "could not be located on this mcp SDK version; refusing to start with unfiltered tools."
+        )
     kept = filter_mcp_tools(list(tools.keys()), include, exclude)
     keep_set = set(kept)
+    remove = getattr(mcp, "remove_tool", None)
     for name in list(tools.keys()):
-        if name not in keep_set:
-            try:
-                del tools[name]
-            except KeyError:
-                pass
+        if name in keep_set:
+            continue
+        if callable(remove):
+            remove(name)
+        else:
+            tools.pop(name, None)
+    leaked = set(tools) - keep_set
+    if leaked:
+        raise RuntimeError(f"Failed to remove MCP tools: {sorted(leaked)}")
     return sorted(keep_set)

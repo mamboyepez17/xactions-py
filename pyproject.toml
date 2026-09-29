@@ -18,10 +18,11 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp[cli]>=1.0"]
-dev = ["pytest>=8.0", "respx>=0.22", "pytest-asyncio>=0.23", "ruff>=0.6"]
+dev = ["pytest>=8.0", "respx>=0.22", "pytest-asyncio>=0.23", "ruff>=0.6", "mcp[cli]>=1.0"]
 
 [project.scripts]
 xactions = "xactions.cli:cli"
+xactions-mcp = "xactions.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
