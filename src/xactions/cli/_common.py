@@ -211,7 +211,9 @@ def _handle_output(
     elif output:
         print_json(data, output)
     elif table_fn:
-        table_fn(data, table_title)
+        # Commands wrap their rows as {"count": n, "<kind>": [...]}; tables need the rows.
+        rows = data if isinstance(data, list) else next((v for v in data.values() if isinstance(v, list)), [])
+        table_fn(rows, table_title)
     else:
         print_json(data)
 
