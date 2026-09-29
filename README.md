@@ -104,6 +104,8 @@ xactions watch "ai" --limit 20   # only new tweets vs last run
 
 ```bash
 xactions post "Hello from xactions-py"
+xactions post "Look at this" --media a.png --media b.jpg   # up to 4 images
+xactions post "New demo" --media demo.mp4                  # or 1 video/GIF (chunked upload)
 xactions thread "Part 1" "Part 2" "End"
 xactions like 1234567890
 xactions follow jack

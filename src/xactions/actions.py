@@ -13,11 +13,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import mimetypes
+import os
 from collections.abc import Callable
 from typing import Any
 
 from .caps import CapsFileError, WriteCapExceeded, check_write, load_caps, record_write, save_caps
-from .client import UPLOAD_BASE, AuthError, XClient
+from .client import UPLOAD_BASE, AuthError, TwitterError, XClient
 
 _log = logging.getLogger(__name__)
 
@@ -66,18 +68,105 @@ def _after_write(client: Any, operation: str) -> None:
 
 # ─── Media upload ─────────────────────────────────────────────────────────────
 
+MEDIA_UPLOAD_URL = f"{UPLOAD_BASE}/1.1/media/upload.json"
+SIMPLE_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
+CHUNK_SIZE = 4 * 1024 * 1024  # X accepts up to 5MB per APPEND segment
+MAX_PROCESSING_WAIT = 300.0  # seconds to wait for X to transcode a video
+
+
+def _media_type(file_path: str) -> str:
+    mime, _ = mimetypes.guess_type(file_path)
+    return mime or "application/octet-stream"
+
+
+def _media_category(mime: str) -> str:
+    if mime.startswith("video/"):
+        return "tweet_video"
+    if mime == "image/gif":
+        return "tweet_gif"
+    return "tweet_image"
+
+
+def _needs_chunked(file_path: str, mime: str) -> bool:
+    return (
+        mime.startswith("video/")
+        or mime == "image/gif"
+        or os.path.getsize(file_path) > SIMPLE_UPLOAD_MAX_BYTES
+    )
+
+
+async def _upload_chunked(client: Any, file_path: str, mime: str) -> dict[str, Any]:
+    """INIT → APPEND (4MB segments) → FINALIZE → poll STATUS until processed."""
+    total = os.path.getsize(file_path)
+    init = await client.upload_request(
+        MEDIA_UPLOAD_URL,
+        data={
+            "command": "INIT",
+            "total_bytes": str(total),
+            "media_type": mime,
+            "media_category": _media_category(mime),
+        },
+    )
+    media_id = init.get("media_id_string") or str(init.get("media_id") or "")
+    if not media_id:
+        raise TwitterError(f"Chunked upload INIT returned no media_id: {init}")
+
+    with open(file_path, "rb") as f:
+        segment = 0
+        while chunk := f.read(CHUNK_SIZE):
+            await client.upload_request(
+                MEDIA_UPLOAD_URL,
+                data={"command": "APPEND", "media_id": media_id, "segment_index": str(segment)},
+                files={"media": ("blob", chunk, "application/octet-stream")},
+            )
+            segment += 1
+
+    result = await client.upload_request(MEDIA_UPLOAD_URL, data={"command": "FINALIZE", "media_id": media_id})
+    waited = 0.0
+    while (info := result.get("processing_info")) and info.get("state") in ("pending", "in_progress"):
+        delay = float(info.get("check_after_secs") or 1)
+        if waited + delay > MAX_PROCESSING_WAIT:
+            raise TwitterError(f"Media {media_id} still processing after {waited:.0f}s")
+        await asyncio.sleep(delay)
+        waited += delay
+        result = await client.upload_request(
+            MEDIA_UPLOAD_URL, method="GET", params={"command": "STATUS", "media_id": media_id}
+        )
+    if info and info.get("state") == "failed":
+        error = info.get("error") or {}
+        raise TwitterError(f"X failed to process media {media_id}: {error.get('message') or error or info}")
+    return {"success": True, "media_id": media_id, "size": total, "chunked": True, "segments": segment}
+
+
+def check_media_set(paths: list[str] | tuple[str, ...]) -> None:
+    """
+    Enforce X's per-tweet media rule: up to 4 images, or exactly one video/GIF.
+    Raises ValueError otherwise.
+    """
+    kinds = [_media_category(_media_type(p)) for p in paths]
+    if len(kinds) > 4:
+        raise ValueError(f"A tweet can carry at most 4 images (got {len(kinds)} files)")
+    if len(kinds) > 1 and any(k != "tweet_image" for k in kinds):
+        raise ValueError("A video or GIF must be the only media in a tweet")
+
+
 async def upload_media(client: XClient, file_path: str) -> dict[str, Any]:
     """
-    Upload an image (jpg/png/gif/webp) to X and return its media_id.
-    Requires auth. Simple upload limit: ~5MB per image.
-    (Video needs chunked INIT/APPEND/FINALIZE upload — not supported yet.)
+    Upload an image, GIF or video to X and return its media_id. Requires auth.
+
+    Images up to 5MB use a single request. Videos, GIFs and larger files use
+    the chunked INIT/APPEND/FINALIZE flow and wait for X to finish processing.
     """
     _require_auth(client)
-    data = await client.rest_upload(f"{UPLOAD_BASE}/1.1/media/upload.json", file_path)
+    mime = _media_type(file_path)
+    if _needs_chunked(file_path, mime):
+        # Every chunk must go to the account that ran INIT, so pin one client.
+        return await _upload_chunked(getattr(client, "current", client), file_path, mime)
+    data = await client.rest_upload(MEDIA_UPLOAD_URL, file_path)
     media_id = data.get("media_id_string") or str(data.get("media_id", ""))
     if not media_id:
         raise AuthError(f"No media_id returned: {data}")
-    return {"success": True, "media_id": media_id, "size": data.get("size")}
+    return {"success": True, "media_id": media_id, "size": data.get("size"), "chunked": False}
 
 
 # ─── Tweets ───────────────────────────────────────────────────────────────────

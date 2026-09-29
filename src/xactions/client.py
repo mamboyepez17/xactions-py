@@ -213,6 +213,16 @@ class XClient(Protocol):
         self, url: str, file_path: str, extra_data: dict[str, Any] | None = None
     ) -> dict[str, Any]: ...
 
+    async def upload_request(
+        self,
+        url: str,
+        *,
+        method: str = "POST",
+        data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
     async def validate_cookies(self) -> dict[str, Any]: ...
 
     async def aclose(self) -> None: ...
@@ -630,30 +640,28 @@ class TwitterClient:
         )
         return resp.json()
 
-    async def rest_upload(
+    async def upload_request(
         self,
         url: str,
-        file_path: str,
-        extra_data: dict[str, Any] | None = None,
+        *,
+        method: str = "POST",
+        data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Upload a binary file via multipart/form-data (media upload).
-        Bypasses _request: multipart cannot be retried safely and needs
-        different headers (httpx sets the boundary itself).
+        One call to the media upload endpoint (simple upload or a chunked
+        INIT/APPEND/FINALIZE/STATUS command). Bypasses _request: uploads are
+        never retried blindly, and multipart needs httpx to set the boundary.
+        Returns the JSON body, or {} for the empty 2xx replies APPEND sends.
         """
         if self._closed:
             raise TwitterError("The client is closed")
-        import os
-
-        filename = os.path.basename(file_path)
-        with open(file_path, "rb") as f:
-            files = {"media": (filename, f)}
-            resp = await self._http.post(
-                url,
-                headers=self._build_headers(),
-                files=files,
-                data=extra_data or {},
-            )
+        headers = self._build_headers(method=method, path=url.split("?", 1)[0])
+        if method.upper() == "GET":
+            resp = await self._http.get(url, headers=headers, params=params)
+        else:
+            resp = await self._http.post(url, headers=headers, params=params, data=data or {}, files=files)
 
         if resp.status_code == 401:
             raise AuthError("Not authenticated to upload media")
@@ -663,8 +671,20 @@ class TwitterClient:
             raise RateLimitError("Rate limited uploading media")
         if resp.status_code >= 400:
             raise TwitterError(f"HTTP {resp.status_code} uploading media: {resp.text[:300]}")
-
+        if not resp.content.strip():
+            return {}
         return resp.json()
+
+    async def rest_upload(
+        self,
+        url: str,
+        file_path: str,
+        extra_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Simple (single-request) multipart upload of a whole file."""
+        filename = os.path.basename(file_path)
+        with open(file_path, "rb") as f:
+            return await self.upload_request(url, data=extra_data, files={"media": (filename, f)})
 
     # ─── Session validation ──────────────────────────────────────────────────────
 

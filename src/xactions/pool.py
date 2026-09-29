@@ -123,6 +123,9 @@ class ClientPool:
     async def rest_upload(self, *args, **kwargs) -> dict[str, Any]:
         return await self._execute("rest_upload", *args, **kwargs)
 
+    async def upload_request(self, *args, **kwargs) -> dict[str, Any]:
+        return await self._execute("upload_request", *args, **kwargs)
+
     async def validate_cookies(self) -> dict[str, Any]:
         """Validate every account in the pool and return a summary."""
         results = []

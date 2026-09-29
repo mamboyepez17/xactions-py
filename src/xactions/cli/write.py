@@ -9,6 +9,7 @@ import click
 
 from ..actions import (
     bulk_unfollow,
+    check_media_set,
     create_bookmark,
     delete_bookmark,
     delete_tweet,
@@ -38,13 +39,18 @@ from ._common import (
 @click.argument("text")
 @click.option("--reply-to", default=None, help="ID of the tweet to reply to")
 @click.option("--media", "media_files", multiple=True, type=click.Path(exists=True),
-              help="Image to attach (repeatable, max 4)")
+              help="Image, GIF or video to attach (repeatable: up to 4 images, or 1 video/GIF)")
 @click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def post(client, text, reply_to, media_files):
     """Post a tweet. Requires auth_token."""
     from ..drafts import approval_required, create_draft
+
+    try:
+        check_media_set(media_files)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
 
     if approval_required():
         if media_files:
@@ -62,10 +68,11 @@ def post(client, text, reply_to, media_files):
 
     async def _post():
         media_ids = []
-        for path in media_files[:4]:
+        for path in media_files:
             up = await upload_media(client, path)
             media_ids.append(up["media_id"])
-            click.echo(f"📎 Media uploaded: {path} (id {up['media_id']})")
+            how = f"chunked, {up['segments']} segment(s)" if up.get("chunked") else "single request"
+            click.echo(f"📎 Media uploaded: {path} (id {up['media_id']}, {how})")
         return await post_tweet(client, text, reply_to_id=reply_to, media_ids=media_ids)
 
     result = run(_post())
