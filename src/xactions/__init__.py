@@ -1,4 +1,4 @@
-"""xactions — X/Twitter automation toolkit (sin npm, sin Puppeteer)."""
+"""xactions — X/Twitter automation toolkit (no npm, no Puppeteer)."""
 
 from importlib.metadata import PackageNotFoundError, version
 
@@ -10,10 +10,13 @@ except PackageNotFoundError:
 from .actions import (
     bulk_unfollow,
     create_bookmark,
+    create_list,
     delete_bookmark,
     delete_tweet,
     follow_user,
     like_tweet,
+    list_add_member,
+    list_remove_member,
     post_thread,
     post_tweet,
     retweet,
@@ -32,17 +35,21 @@ from .client import (
     RateLimitError,
     TwitterClient,
     TwitterError,
+    XClient,
     refresh_graphql_endpoints,
 )
 from .db import TrackerDB, compute_profile_delta
 from .doctor import run_doctor
 from .pool import ClientPool
+from .schedule import ScheduleStore, parse_when, run_due
 from .scrapers import (
     clear_user_id_cache,
     get_bookmarks,
     get_bookmarks_sync,
     get_home_timeline,
     get_home_timeline_sync,
+    get_list_members,
+    get_list_tweets,
     get_trends,
     get_trends_sync,
     get_tweet_favoriters,
@@ -71,6 +78,7 @@ __all__ = [
     "__version__",
     # client
     "TwitterClient",
+    "XClient",
     "ClientPool",
     "TwitterError",
     "AuthError",
@@ -98,6 +106,8 @@ __all__ = [
     "get_tweet_retweeters",
     "get_tweet_retweeters_sync",
     "get_bookmarks",
+    "get_list_members",
+    "get_list_tweets",
     "get_bookmarks_sync",
     "get_home_timeline",
     "get_home_timeline_sync",
@@ -116,6 +126,9 @@ __all__ = [
     "retweet",
     "unretweet",
     "create_bookmark",
+    "create_list",
+    "list_add_member",
+    "list_remove_member",
     "delete_bookmark",
     "follow_user",
     "unfollow_user",
@@ -131,5 +144,8 @@ __all__ = [
     # v1.6
     "WriteCapExceeded",
     "try_charge",
+    "ScheduleStore",
+    "parse_when",
+    "run_due",
     "run_doctor",
 ]

@@ -61,3 +61,59 @@ async def test_post_webhook():
     r = await post_webhook("https://example.test/h", {"a": 1})
     assert r["ok"] is True
     assert r["status_code"] == 204
+
+
+# ─── Signed webhooks ──────────────────────────────────────────────────────────
+
+from xactions.notify import (  # noqa: E402
+    SIGNATURE_HEADER,
+    TIMESTAMP_HEADER,
+    build_request,
+    sign_payload,
+    verify_signature,
+)
+
+
+def test_unsigned_without_secret():
+    body, headers = build_request({"text": "hi"})
+    assert SIGNATURE_HEADER not in headers
+    assert body == b'{"text":"hi"}'
+
+
+def test_sign_and_verify_roundtrip():
+    body, headers = build_request({"text": "hi"}, "s3cret", now=1_000_000)
+    assert headers[TIMESTAMP_HEADER] == "1000000"
+    assert verify_signature("s3cret", body, headers[TIMESTAMP_HEADER], headers[SIGNATURE_HEADER], now=1_000_010)
+
+
+def test_verify_rejects_tampering_wrong_secret_and_replay():
+    body, headers = build_request({"text": "hi"}, "s3cret", now=1_000_000)
+    ts, sig = headers[TIMESTAMP_HEADER], headers[SIGNATURE_HEADER]
+    assert not verify_signature("s3cret", body + b" ", ts, sig, now=1_000_000)
+    assert not verify_signature("other", body, ts, sig, now=1_000_000)
+    assert not verify_signature("s3cret", body, ts, sig, now=1_000_000 + 301)
+    assert not verify_signature("s3cret", body, "not-a-number", sig, now=1_000_000)
+
+
+def test_signature_known_vector():
+    # Stable format: receivers in other languages depend on it.
+    assert sign_payload("key", b"{}", 1) == (
+        "sha256=" + __import__("hmac").new(b"key", b"1.{}", "sha256").hexdigest()
+    )
+
+
+@respx.mock
+def test_notifier_signs_when_secret_set(monkeypatch):
+    monkeypatch.setenv("XACTIONS_WEBHOOK_SECRET", "s3cret")
+    route = respx.post("https://example.test/hook").mock(return_value=httpx.Response(200))
+    make_notifier("https://example.test/hook")("hello")
+    req = route.calls.last.request
+    assert verify_signature("s3cret", req.read(), req.headers[TIMESTAMP_HEADER], req.headers[SIGNATURE_HEADER])
+
+
+@respx.mock
+async def test_post_webhook_signs(monkeypatch):
+    route = respx.post("https://example.test/h").mock(return_value=httpx.Response(204))
+    await post_webhook("https://example.test/h", {"a": 1}, secret="k")
+    req = route.calls.last.request
+    assert verify_signature("k", req.read(), req.headers[TIMESTAMP_HEADER], req.headers[SIGNATURE_HEADER])

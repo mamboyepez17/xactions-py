@@ -1,12 +1,12 @@
 """
 XActions-PY — Storage
-Tracking histórico de métricas en SQLite (stdlib, cero dependencias).
+Historical metric tracking in SQLite (stdlib, zero dependencies).
 
-Guarda snapshots de perfiles y tweets con timestamp para analizar cómo
-evoluciona el engagement en el tiempo.
+Stores timestamped profile and tweet snapshots to see how engagement
+evolves over time.
 
-Por defecto la base vive en ~/.xactions/xactions.db
-(se puede cambiar con la env var XACTIONS_DB o pasando un path).
+The database lives in ~/.xactions/xactions.db by default
+(override with the XACTIONS_DB env var or by passing a path).
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def _utc_now() -> str:
 
 
 class TrackerDB:
-    """Capa mínima de acceso a la base de tracking."""
+    """Minimal access layer for the tracking database."""
 
     def __init__(self, path: str | None = None):
         self.path = str(path or DEFAULT_DB_PATH)
@@ -61,7 +61,7 @@ class TrackerDB:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
-        # WAL permite lecturas concurrentes mientras otro proceso escribe.
+        # WAL lets readers proceed while another process writes.
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=10000")
         return conn
@@ -70,7 +70,7 @@ class TrackerDB:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
 
-    # ─── Escritura ────────────────────────────────────────────────────────────
+    # ─── Writes ───────────────────────────────────────────────────────────────
 
     def save_profile_snapshot(self, username: str, profile: dict[str, Any]) -> None:
         with self._connect() as conn:
@@ -87,7 +87,7 @@ class TrackerDB:
             )
 
     def save_tweet_snapshots(self, tweets: list[dict[str, Any]]) -> int:
-        """Guarda un snapshot por tweet. Devuelve cuántos guardó."""
+        """Store one snapshot per tweet. Returns how many were stored."""
         rows = [
             (
                 t.get("id"),
@@ -113,7 +113,7 @@ class TrackerDB:
             )
         return len(rows)
 
-    # ─── Lectura ──────────────────────────────────────────────────────────────
+    # ─── Reads ───────────────────────────────────────────────────────────────
 
     def get_last_profile_snapshot(self, username: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -148,7 +148,7 @@ class TrackerDB:
 
 
 def compute_profile_delta(previous: dict[str, Any] | None, current: dict[str, Any]) -> dict[str, Any]:
-    """Calcula el delta de seguidores entre el snapshot previo y el perfil actual."""
+    """Follower delta between the previous snapshot and the current profile."""
     if not previous:
         return {"followers_delta": None, "following_delta": None, "tweets_delta": None}
     return {

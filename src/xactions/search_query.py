@@ -1,7 +1,7 @@
 """
-XActions-PY — Query builder de búsqueda avanzada de X.
+XActions-PY — Builder for X advanced-search queries.
 
-Operadores soportados (sintaxis nativa de X search):
+Supported operators (native X search syntax):
   from:user  to:user  @user  #hashtag  "exact phrase"
   since:YYYY-MM-DD  until:YYYY-MM-DD
   min_faves:N  min_retweets:N  min_replies:N
@@ -37,9 +37,9 @@ def build_search_query(
     extra: str | None = None,
 ) -> str:
     """
-    Construye una query de búsqueda de X a partir de flags.
+    Build an X search query from flags.
 
-    Ejemplo:
+    Example:
         build_search_query(
             "crypto",
             from_user="elonmusk",

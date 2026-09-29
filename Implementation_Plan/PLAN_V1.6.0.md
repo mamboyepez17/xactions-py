@@ -1,7 +1,7 @@
 # xactions-py — Implementation Plan v1.6.0
 
-> **Branch:** `feature/v1.6.0`  
-> **Base:** v1.5.0 (`71b3d34`)  
+> **Branch:** `feature/v1.6.0`
+> **Base:** v1.5.0 (`71b3d34`)
 > **Mode:** Autonomous — each block advances when its tests pass (no per-block approval).
 
 Inspired by gaps vs [XActions (JS)](https://github.com/nirholas/XActions), without cloning their platform scope. Focus: safety, DX, reliability in pure Python.

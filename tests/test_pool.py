@@ -1,4 +1,4 @@
-"""Tests para el ClientPool (rotación multi-cuenta)."""
+"""Tests for ClientPool (multi-account rotation)."""
 
 import pytest
 
@@ -7,11 +7,11 @@ from xactions.pool import ClientPool
 
 
 class StubClient:
-    """Cliente falso con comportamiento programable."""
+    """Fake client with scripted behavior."""
 
     def __init__(self, name, behavior):
         self.name = name
-        self.behavior = behavior  # lista de excepciones o valores de retorno
+        self.behavior = behavior  # list of exceptions or return values
         self.calls = 0
         self.closed = False
 

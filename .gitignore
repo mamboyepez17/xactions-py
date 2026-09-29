@@ -1,4 +1,4 @@
-# Credenciales — NUNCA subir
+# Credentials — never commit
 .env
 *.env
 cookies.txt
@@ -18,10 +18,12 @@ build/
 .pytest_cache/
 .ruff_cache/
 
-# Datos de salida
-*.json
-*.csv
+# Output data (root only, so fixtures/examples in subfolders can be versioned)
+/*.json
+/*.csv
 data/
+.coverage
+htmlcov/
 
 # IDEs
 .vscode/

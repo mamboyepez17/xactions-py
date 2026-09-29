@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **`--table` crashed on every read command** (it iterated the result wrapper instead of the rows).
+- **CSV export crashed** when rows had different keys; it now writes the union of columns.
+- **Tests no longer write to the real `~/.xactions`** (they were charging your real daily write caps).
+- **Daily write caps now persist across runs.** The per-account key used Python's per-process salted `hash()`, so every CLI/MCP run started from zero. It is now a SHA-256 of the auth token, and `ClientPool` is keyed by the account in use.
+- **`bulk_unfollow` stops** on `WriteCapExceeded` / `AuthError` instead of sleeping through the rest of the list (result gains a `stopped` field).
+- **Non-followers no longer include real followers.** `scrape_non_followers` truncated the follower list to `limit`, so accounts with more followers than `limit` had real followers reported (and bulk-unfollowed). The follower list is now fetched in full, and an incomplete list (< 90% of the profile count) raises instead of returning unsafe results.
+- **MCP approval gate is enforced.** With `XACTIONS_REQUIRE_APPROVAL=1` all MCP write tools save drafts instead of writing. `x_approve_draft` was removed so an agent cannot approve its own drafts.
+- **MCP tool filter fails closed** and is applied at import time (not only under `python -m`).
+- `xactions post --media` no longer bypasses the approval gate.
+
+- **Every write is charged against the daily caps**: unlike, retweet, unretweet, delete, bookmark and unbookmark were never counted, and `thread_tweet` was defined but unused.
+- **Caps file fails closed**: a corrupt `write_caps.json` used to be treated as empty (resetting the budget); writes are now refused with `CapsFileError` until it is fixed or deleted. Saves are atomic (temp file + rename).
+- **`ClientPool` no longer kills accounts on HTTP 403**: a 403 usually means the resource is off-limits (protected account, blocked search), not a dead session. Only 401/auth errors mark an account dead.
+- **`validate_cookies` reports the logged-in account**: it used to return the author of the first home-timeline tweet (someone you follow). It now reads the `twid` cookie + `UserByRestId`, falling back to `account/settings.json`.
+- **No `br` in `Accept-Encoding`**: httpx cannot decode brotli without the optional `brotli` package, so responses could be unreadable.
+- **Webhook notify no longer blocks the event loop** inside pipelines/watch (the POST runs on the default executor).
+- **Scrape checkpoints are cleared when a list is fully read**, so the next run starts fresh instead of resuming at the end.
+- `mypy src` is clean (was 46 errors): new `XClient` protocol shared by `TwitterClient` and `ClientPool`.
+- `TwitterClient.close()` no longer uses the deprecated `asyncio.get_event_loop()`.
+
+### Changed
+- **English everywhere**: CLI output and help, MCP tool descriptions and replies, error messages, logs, docstrings, comments and `.env.example` are now in English (the EN/ES sentiment lexicon is unchanged). Scripts that matched on the old Spanish messages need updating.
+- **`cli.py` split into a `cli/` package** (`read`, `analytics`, `write`, `monitor`, `system` + shared `_common`). Entry points and every command/option are unchanged.
+- `.gitignore` only ignores JSON/CSV output at the repo root, so fixtures and example pipelines can be versioned.
+- README shows the live CI badge instead of a hand-maintained test count.
+
+### Added
+- **Scheduled tweets**: `xactions schedule add|list|cancel|run` (SQLite queue, atomic claim so overlapping runs never double-post, daily caps apply; `--at` ISO or `+30m/+2h/+1d`).
+- **X Lists**: `xactions lists tweets|members|create|add|remove`, library functions and MCP tools (`x_get_list_tweets`, `x_get_list_members`, `x_create_list`, `x_add_list_member`, `x_remove_list_member`); writes are capped and draft-gated.
+- **Video/GIF upload**: chunked INIT/APPEND/FINALIZE/STATUS upload; `post --media` accepts one video/GIF or up to 4 images.
+- **Signed webhooks**: `XACTIONS_WEBHOOK_SECRET` adds `X-Xactions-Timestamp` + `X-Xactions-Signature` (HMAC-SHA256); `notify.verify_signature()` for receivers.
+- **Follower-history chart** in `report --format html` (from `xactions track` snapshots), light/dark aware.
+- **`--csv` / `--ndjson`** on `history`, `compare`, `sentiment`, `unfollowers`, `schedule list` and `drafts list`.
+- **PyPI release workflow** (`.github/workflows/release.yml`): tag `vX.Y.Z` → test, build, `twine check`, publish via Trusted Publishing. Package metadata (classifiers, URLs, keywords).
+- Coverage report in CI with a 55% floor (`pytest-cov`).
+- `.pre-commit-config.yaml` (whitespace/YAML/TOML/private-key hooks + the project's ruff and mypy).
+- `mypy` in CI.
+- `xactions-mcp` console script.
+- `drafts.execute_draft()` shared executor (adds `retweet`, `unbookmark`, `post_thread` drafts).
+
 ## v1.8.0 — 2026-09-10
 
 ### Added

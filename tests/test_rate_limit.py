@@ -1,4 +1,4 @@
-"""Tests del throttle proactivo de rate limits."""
+"""Tests for proactive rate-limit throttling."""
 
 import time
 
@@ -42,7 +42,7 @@ def test_rate_limit_key_normalizes_query_id():
 
 @respx.mock
 async def test_proactive_throttle_waits_before_request(monkeypatch):
-    """Si remaining=0 y reset en el futuro, espera antes de pegar a la red."""
+    """With remaining=0 and a future reset, wait before hitting the network."""
     client = TwitterClient(
         cookies="auth_token=a; ct0=b",
         max_retries=0,
@@ -113,7 +113,7 @@ async def test_429_respects_max_rate_limit_wait(monkeypatch):
 
     with pytest.raises(RateLimitError):
         await client.graphql("UserByScreenName", variables={"screen_name": "t"})
-    # El wait del 429 debe estar capado a max_rate_limit_wait
+    # The 429 wait must be capped at max_rate_limit_wait
     assert slept
     assert all(s <= 1.5 for s in slept)
 
@@ -129,4 +129,4 @@ def test_scrapers_use_larger_page_sizes():
     assert PAGE_SIZE_USERS >= 100
     assert PAGE_SIZE_ENGAGEMENT >= 50
     assert PAGE_SIZE_TWEETS >= 40
-    assert PAGE_SIZE_SEARCH == 20  # Search sigue capado por la API
+    assert PAGE_SIZE_SEARCH == 20  # Search is still capped by the API

@@ -1,15 +1,15 @@
 """
 XActions-PY — MCP Server
-Servidor MCP para agentes AI (Claude, Mambo, etc.)
-Sin npm. Usa MCPServer (mcp>=2) o FastMCP (mcp 1.x) + httpx puro.
+MCP server for AI agents.
+No npm. Uses MCPServer (mcp>=2) or FastMCP (mcp 1.x) + plain httpx.
 
 v1.2.0:
-  - Herramientas nuevas: replies, favoriters, retweeters, user likes, bookmarks,
-    home timeline, trending topics, validación de cookies, bookmark/unbookmark.
-  - Mejor manejo de errores (ForbiddenError).
+  - New tools: replies, favoriters, retweeters, user likes, bookmarks,
+    home timeline, trending topics, cookie validation, bookmark/unbookmark.
+  - Better error handling (ForbiddenError).
 
 v1.5.0:
-  - Compatible con mcp 2.x (MCPServer) y mcp 1.x (FastMCP).
+  - Compatible with mcp 2.x (MCPServer) and mcp 1.x (FastMCP).
 """
 
 from __future__ import annotations
@@ -27,15 +27,18 @@ try:
     # mcp >= 2
     from mcp.server.mcpserver import MCPServer as _MCPServer
 except ImportError:  # pragma: no cover - compat mcp 1.x
-    from mcp.server.fastmcp import FastMCP as _MCPServer
+    from mcp.server.fastmcp import FastMCP as _MCPServer  # type: ignore[no-redef,attr-defined]
 
 from .actions import (
     bulk_unfollow,
     create_bookmark,
+    create_list,
     delete_bookmark,
     delete_tweet,
     follow_user,
     like_tweet,
+    list_add_member,
+    list_remove_member,
     post_thread,
     post_tweet,
     retweet,
@@ -51,10 +54,13 @@ from .client import (
     TwitterClient,
     TwitterError,
 )
+from .drafts import approval_required, create_draft
 from .pool import ClientPool
 from .scrapers import (
     get_bookmarks,
     get_home_timeline,
+    get_list_members,
+    get_list_tweets,
     get_trends,
     get_tweet_favoriters,
     get_tweet_replies,
@@ -70,13 +76,13 @@ from .scrapers import (
 )
 from .search_query import build_search_query
 
-# ─── Inicialización ───────────────────────────────────────────────────────────
+# ─── Setup ───────────────────────────────────────────────────────────────────
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 mcp = _MCPServer(
     "xactions-py",
-    instructions="X/Twitter automation toolkit — Python port of XActions. Sin npm.",
+    instructions="X/Twitter automation toolkit — Python port of XActions. No npm.",
 )
 
 _cookies = os.getenv("TWITTER_COOKIES", "")
@@ -87,8 +93,8 @@ _client_key: str | None = None
 
 def get_client(cookies: str | None = None) -> TwitterClient | ClientPool:
     """
-    Retorna el cliente singleton, reconfigurándolo si se pasan cookies nuevas.
-    Si hay varias cookies (separadas por '|||' o salto de línea) crea un pool.
+    Return the singleton client, rebuilding it when new cookies are passed.
+    Several cookie strings (separated by '|||' or newlines) create a pool.
     """
     global _client, _client_key
     effective = cookies or _cookies
@@ -99,7 +105,7 @@ def get_client(cookies: str | None = None) -> TwitterClient | ClientPool:
             cookies=parts[0] if parts else "", proxy=_proxy
         )
         _client_key = effective
-        # Cerrar el cliente anterior (libera sockets) sin bloquear el loop.
+        # Close the previous client (frees sockets) without blocking the loop.
         if old is not None:
             asyncio.get_running_loop().create_task(old.aclose())
     return _client
@@ -107,34 +113,49 @@ def get_client(cookies: str | None = None) -> TwitterClient | ClientPool:
 
 def _fmt_error(e: Exception) -> str:
     if isinstance(e, AuthError):
-        return f"❌ Error de autenticación: {e}. Verifica tu auth_token y ct0."
+        return f"❌ Authentication error: {e}. Check your auth_token and ct0."
     if isinstance(e, ForbiddenError):
-        return f"🚫 Acceso denegado: {e}. Puede ser una restricción de la API para esta cuenta/query."
+        return f"🚫 Access denied: {e}. X may restrict this account/query."
     if isinstance(e, RateLimitError):
-        return f"⏳ Rate limit alcanzado: {e}. Espera unos minutos."
+        return f"⏳ Rate limited: {e}. Wait a few minutes."
     if isinstance(e, NotFoundError):
-        return f"🔍 No encontrado: {e}"
+        return f"🔍 Not found: {e}"
     if isinstance(e, TwitterError):
-        return f"🐦 Error de Twitter: {e}"
-    return f"💥 Error inesperado: {type(e).__name__}: {e}"
+        return f"🐦 X error: {e}"
+    return f"💥 Unexpected error: {type(e).__name__}: {e}"
 
 
-# ─── Herramientas MCP ─────────────────────────────────────────────────────────
+def _draft_if_required(action: str, params: dict) -> str | None:
+    """
+    Approval gate for write tools. When XACTIONS_REQUIRE_APPROVAL is set the
+    write is saved as a draft instead of reaching X, and the returned message
+    tells the agent that a human has to release it from the CLI.
+    """
+    if not approval_required():
+        return None
+    draft = create_draft(action, params)
+    return (
+        f"📝 Approval required: saved draft {draft['id']} ({action}); nothing was sent to X. "
+        f"A human must review and run it with: xactions drafts approve {draft['id']}"
+    )
+
+
+# ─── MCP tools ───────────────────────────────────────────────────────────────
 
 @mcp.tool()
 async def x_set_cookies(cookies: str) -> str:
     """
-    Configura las cookies de sesión de Twitter para esta sesión.
-    Obtén auth_token y ct0 de: x.com → DevTools (F12) → Application → Cookies.
-    cookies: string formato 'auth_token=xxx; ct0=yyy'
+    Set the X session cookies for this session.
+    Get auth_token and ct0 from: x.com → DevTools (F12) → Application → Cookies.
+    cookies: string in the form 'auth_token=xxx; ct0=yyy'
     """
     get_client(cookies)
-    return "✅ Cookies configuradas correctamente."
+    return "✅ Cookies set."
 
 
 @mcp.tool()
 async def x_validate_cookies() -> str:
-    """Verifica que las cookies actuales sean válidas."""
+    """Check that the current cookies are valid."""
     try:
         client = get_client()
         result = await client.validate_cookies()
@@ -146,8 +167,8 @@ async def x_validate_cookies() -> str:
 @mcp.tool()
 async def x_get_profile(username: str) -> str:
     """
-    Obtiene el perfil completo de un usuario de Twitter/X.
-    username: nombre de usuario sin @ (ej: 'elonmusk')
+    Fetch an X user's full profile.
+    username: handle without @ (e.g. 'elonmusk')
     """
     try:
         client = get_client()
@@ -160,9 +181,9 @@ async def x_get_profile(username: str) -> str:
 @mcp.tool()
 async def x_get_followers(username: str, limit: int = 100) -> str:
     """
-    Obtiene la lista de followers de un usuario.
-    username: nombre de usuario sin @
-    limit: máximo de usuarios a obtener (default 100, max recomendado 500)
+    Fetch a user's followers.
+    username: handle without @
+    limit: maximum users to fetch (default 100, recommended max 500)
     """
     try:
         client = get_client()
@@ -178,9 +199,9 @@ async def x_get_followers(username: str, limit: int = 100) -> str:
 @mcp.tool()
 async def x_get_following(username: str, limit: int = 100) -> str:
     """
-    Obtiene la lista de usuarios que sigue una cuenta.
-    username: nombre de usuario sin @
-    limit: máximo de usuarios a obtener
+    Fetch the accounts a user follows.
+    username: handle without @
+    limit: maximum users to fetch
     """
     try:
         client = get_client()
@@ -196,10 +217,10 @@ async def x_get_following(username: str, limit: int = 100) -> str:
 @mcp.tool()
 async def x_get_non_followers(username: str, limit: int = 200) -> str:
     """
-    Encuentra usuarios que sigues pero que NO te siguen de vuelta.
-    Útil para hacer limpieza de following.
-    username: tu nombre de usuario sin @
-    limit: cuántos following revisar (default 200)
+    Find accounts you follow that do NOT follow you back.
+    Useful to clean up your following list.
+    username: your handle without @
+    limit: how many followed accounts to check (default 200)
     """
     try:
         client = get_client()
@@ -219,9 +240,9 @@ async def x_get_tweets(
     include_replies: bool = False,
 ) -> str:
     """
-    Obtiene los tweets recientes de un usuario.
-    username: nombre de usuario sin @
-    limit: cantidad de tweets (default 50)
+    Fetch a user's recent tweets.
+    username: handle without @
+    limit: number of tweets (default 50)
     include_replies: incluir respuestas (default False)
     """
     try:
@@ -237,7 +258,7 @@ async def x_get_tweets(
 
 @mcp.tool()
 async def x_get_user_likes(username: str, limit: int = 50) -> str:
-    """Obtiene los tweets a los que les dio like un usuario."""
+    """Fetch the tweets a user liked."""
     try:
         client = get_client()
         tweets = await get_user_likes(client, username, limit=limit)
@@ -256,10 +277,10 @@ async def x_search_tweets(
     mode: str = "Top",
 ) -> str:
     """
-    Busca tweets por query.
-    query: término de búsqueda
-    limit: cantidad de resultados (default 50)
-    mode: 'Latest' o 'Top'
+    Search tweets by query.
+    query: search terms
+    limit: number of results (default 50)
+    mode: 'Latest' or 'Top'
     """
     try:
         client = get_client()
@@ -275,7 +296,7 @@ async def x_search_tweets(
 
 @mcp.tool()
 async def x_get_tweet_replies(tweet_id: str, limit: int = 50) -> str:
-    """Obtiene replies/conversación de un tweet."""
+    """Fetch a tweet's replies/conversation."""
     try:
         client = get_client()
         tweets = await get_tweet_replies(client, tweet_id, limit=limit)
@@ -290,7 +311,7 @@ async def x_get_tweet_replies(tweet_id: str, limit: int = 50) -> str:
 
 @mcp.tool()
 async def x_get_tweet_favoriters(tweet_id: str, limit: int = 100) -> str:
-    """Obtiene usuarios que dieron like a un tweet."""
+    """Fetch the users who liked a tweet."""
     try:
         client = get_client()
         users = await get_tweet_favoriters(client, tweet_id, limit=limit)
@@ -305,7 +326,7 @@ async def x_get_tweet_favoriters(tweet_id: str, limit: int = 100) -> str:
 
 @mcp.tool()
 async def x_get_tweet_retweeters(tweet_id: str, limit: int = 100) -> str:
-    """Obtiene usuarios que hicieron retweet de un tweet."""
+    """Fetch the users who retweeted a tweet."""
     try:
         client = get_client()
         users = await get_tweet_retweeters(client, tweet_id, limit=limit)
@@ -320,7 +341,7 @@ async def x_get_tweet_retweeters(tweet_id: str, limit: int = 100) -> str:
 
 @mcp.tool()
 async def x_get_bookmarks(limit: int = 50) -> str:
-    """Obtiene los bookmarks del usuario autenticado. Requiere auth."""
+    """Fetch the authenticated user's bookmarks. Requires auth."""
     try:
         client = get_client()
         tweets = await get_bookmarks(client, limit=limit)
@@ -333,8 +354,28 @@ async def x_get_bookmarks(limit: int = 50) -> str:
 
 
 @mcp.tool()
+async def x_get_list_tweets(list_id: str, limit: int = 50) -> str:
+    """Fetch the latest tweets of an X List. list_id: numeric List ID."""
+    try:
+        tweets = await get_list_tweets(get_client(), list_id, limit=limit)
+        return json.dumps({"list_id": list_id, "count": len(tweets), "tweets": tweets}, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_get_list_members(list_id: str, limit: int = 100) -> str:
+    """Fetch the members of an X List. list_id: numeric List ID."""
+    try:
+        users = await get_list_members(get_client(), list_id, limit=limit)
+        return json.dumps({"list_id": list_id, "count": len(users), "members": users}, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
 async def x_get_home_timeline(limit: int = 50, latest: bool = False) -> str:
-    """Obtiene el home timeline del usuario autenticado. Requiere auth."""
+    """Fetch the authenticated user's home timeline. Requires auth."""
     try:
         client = get_client()
         tweets = await get_home_timeline(client, limit=limit, latest=latest)
@@ -349,10 +390,10 @@ async def x_get_home_timeline(limit: int = 50, latest: bool = False) -> str:
 @mcp.tool()
 async def x_analyze_user(username: str, limit: int = 100) -> str:
     """
-    Analiza el engagement de un usuario: promedios, engagement rate,
-    top tweets, mejores horas y días para publicar.
-    username: nombre de usuario sin @
-    limit: cuántos tweets recientes analizar (default 100)
+    Analyze a user's engagement: averages, engagement rate,
+    top tweets, best hours and days to post.
+    username: handle without @
+    limit: how many recent tweets to analyze (default 100)
     """
     try:
         client = get_client()
@@ -367,7 +408,7 @@ async def x_analyze_user(username: str, limit: int = 100) -> str:
 
 @mcp.tool()
 async def x_get_trends(woeid: int = 1) -> str:
-    """Obtiene trending topics. woeid=1 es worldwide."""
+    """Fetch trending topics. woeid=1 is worldwide."""
     try:
         client = get_client()
         trends = await get_trends(client, woeid=woeid)
@@ -385,16 +426,18 @@ async def x_post_tweet(
     reply_to_id: str | None = None,
 ) -> str:
     """
-    Publica un tweet. Requiere autenticación (auth_token).
-    text: contenido del tweet (máx 280 caracteres)
-    reply_to_id: ID del tweet al que responder (opcional)
+    Post a tweet. Requires authentication (auth_token).
+    text: tweet text (max 280 characters)
+    reply_to_id: ID of the tweet to reply to (optional)
     """
     try:
+        if gated := _draft_if_required("post_tweet", {"text": text, "reply_to_id": reply_to_id}):
+            return gated
         client = get_client()
         result = await post_tweet(client, text, reply_to_id=reply_to_id)
         if result["success"]:
-            return f"✅ Tweet publicado. ID: {result['tweet_id']}"
-        return "❌ No se pudo publicar el tweet."
+            return f"✅ Tweet posted. ID: {result['tweet_id']}"
+        return "❌ Could not post the tweet."
     except Exception as e:
         return _fmt_error(e)
 
@@ -402,20 +445,22 @@ async def x_post_tweet(
 @mcp.tool()
 async def x_post_thread(tweets: list[str], delay: float = 1.5) -> str:
     """
-    Publica un hilo de tweets (cada uno responde al anterior). Requiere auth.
-    tweets: lista de textos en orden
-    delay: segundos entre tweets (default 1.5)
+    Post a thread (each tweet replies to the previous one). Requires auth.
+    tweets: texts in order
+    delay: seconds between tweets (default 1.5)
     """
     try:
+        if gated := _draft_if_required("post_thread", {"tweets": tweets, "delay_seconds": delay}):
+            return gated
         client = get_client()
         result = await post_thread(client, tweets, delay_seconds=delay)
         if result["success"]:
             return (
-                f"✅ Hilo publicado ({result['count']} tweets).\n"
+                f"✅ Thread posted ({result['count']} tweets).\n"
                 f"  Root: {result['root_id']}\n"
                 f"  IDs: {', '.join(result['tweet_ids'])}"
             )
-        return f"❌ {result.get('error', 'Error publicando hilo')}"
+        return f"❌ {result.get('error', 'Error posting thread')}"
     except Exception as e:
         return _fmt_error(e)
 
@@ -423,9 +468,9 @@ async def x_post_thread(tweets: list[str], delay: float = 1.5) -> str:
 @mcp.tool()
 async def x_compare_accounts(user_a: str, user_b: str, limit: int = 50) -> str:
     """
-    Compara dos cuentas: followers, engagement rate y promedios.
-    user_a / user_b: nombres de usuario sin @
-    limit: tweets recientes a analizar por cuenta (default 50)
+    Compare two accounts: followers, engagement rate and averages.
+    user_a / user_b: handles without @
+    limit: recent tweets to analyze per account (default 50)
     """
     try:
         client = get_client()
@@ -452,8 +497,8 @@ async def x_build_search_query(
     exclude_retweets: bool = False,
 ) -> str:
     """
-    Construye una query de búsqueda avanzada de X (operadores from/since/min_faves…).
-    Úsala con x_search_tweets.
+    Build an X advanced-search query (from/since/min_faves… operators).
+    Use it with x_search_tweets.
     """
     q = build_search_query(
         base,
@@ -470,43 +515,51 @@ async def x_build_search_query(
 @mcp.tool()
 async def x_delete_tweet(tweet_id: str) -> str:
     """
-    Elimina un tweet por su ID. Requiere autenticación.
-    tweet_id: ID numérico del tweet
+    Delete a tweet by ID. Requires authentication.
+    tweet_id: numeric tweet ID
     """
     try:
+        if gated := _draft_if_required("delete", {"tweet_id": tweet_id}):
+            return gated
         client = get_client()
         result = await delete_tweet(client, tweet_id)
-        return "✅ Tweet eliminado." if result["success"] else "❌ No se pudo eliminar el tweet."
+        return "✅ Tweet deleted." if result["success"] else "❌ Could not delete the tweet."
     except Exception as e:
         return _fmt_error(e)
 
 
 @mcp.tool()
 async def x_like_tweet(tweet_id: str) -> str:
-    """Da like a un tweet. Requiere autenticación."""
+    """Like a tweet. Requires authentication."""
     try:
+        if gated := _draft_if_required("like", {"tweet_id": tweet_id}):
+            return gated
         result = await like_tweet(get_client(), tweet_id)
-        return "✅ Like dado." if result["success"] else "❌ No se pudo dar like."
+        return "✅ Liked." if result["success"] else "❌ Could not like the tweet."
     except Exception as e:
         return _fmt_error(e)
 
 
 @mcp.tool()
 async def x_unlike_tweet(tweet_id: str) -> str:
-    """Quita el like de un tweet. Requiere autenticación."""
+    """Remove a like from a tweet. Requires authentication."""
     try:
+        if gated := _draft_if_required("unlike", {"tweet_id": tweet_id}):
+            return gated
         result = await unlike_tweet(get_client(), tweet_id)
-        return "✅ Like quitado." if result["success"] else "❌ No se pudo quitar el like."
+        return "✅ Like removed." if result["success"] else "❌ Could not remove the like."
     except Exception as e:
         return _fmt_error(e)
 
 
 @mcp.tool()
 async def x_retweet(tweet_id: str) -> str:
-    """Hace retweet de un tweet. Requiere autenticación."""
+    """Retweet a tweet. Requires authentication."""
     try:
+        if gated := _draft_if_required("retweet", {"tweet_id": tweet_id}):
+            return gated
         result = await retweet(get_client(), tweet_id)
-        return "✅ Retweet hecho." if result["success"] else "❌ No se pudo hacer retweet."
+        return "✅ Retweeted." if result["success"] else "❌ Could not retweet."
     except Exception as e:
         return _fmt_error(e)
 
@@ -514,14 +567,16 @@ async def x_retweet(tweet_id: str) -> str:
 @mcp.tool()
 async def x_follow_user(username: str) -> str:
     """
-    Sigue a un usuario. Requiere autenticación.
-    username: nombre de usuario sin @
+    Follow a user. Requires authentication.
+    username: handle without @
     """
     try:
+        if gated := _draft_if_required("follow", {"username": username}):
+            return gated
         client = get_client()
         user_id = await get_user_id(client, username)
         result = await follow_user(client, user_id)
-        return f"✅ Siguiendo a @{username}." if result["success"] else f"❌ No se pudo seguir a @{username}."
+        return f"✅ Following @{username}." if result["success"] else f"❌ Could not follow @{username}."
     except Exception as e:
         return _fmt_error(e)
 
@@ -529,36 +584,81 @@ async def x_follow_user(username: str) -> str:
 @mcp.tool()
 async def x_unfollow_user(username: str) -> str:
     """
-    Deja de seguir a un usuario. Requiere autenticación.
-    username: nombre de usuario sin @
+    Unfollow a user. Requires authentication.
+    username: handle without @
     """
     try:
+        if gated := _draft_if_required("unfollow", {"username": username}):
+            return gated
         client = get_client()
         user_id = await get_user_id(client, username)
         result = await unfollow_user(client, user_id)
-        return f"✅ Dejaste de seguir a @{username}." if result["success"] else f"❌ No se pudo hacer unfollow de @{username}."
+        return f"✅ Unfollowed @{username}." if result["success"] else f"❌ Could not unfollow @{username}."
     except Exception as e:
         return _fmt_error(e)
 
 
 @mcp.tool()
 async def x_bookmark_tweet(tweet_id: str) -> str:
-    """Agrega un tweet a bookmarks. Requiere autenticación."""
+    """Bookmark a tweet. Requires authentication."""
     try:
+        if gated := _draft_if_required("bookmark", {"tweet_id": tweet_id}):
+            return gated
         client = get_client()
         result = await create_bookmark(client, tweet_id)
-        return "✅ Bookmark agregado." if result["success"] else "❌ No se pudo agregar bookmark."
+        return "✅ Bookmarked." if result["success"] else "❌ Could not bookmark the tweet."
     except Exception as e:
         return _fmt_error(e)
 
 
 @mcp.tool()
 async def x_unbookmark_tweet(tweet_id: str) -> str:
-    """Elimina un tweet de bookmarks. Requiere autenticación."""
+    """Remove a tweet from bookmarks. Requires authentication."""
     try:
+        if gated := _draft_if_required("unbookmark", {"tweet_id": tweet_id}):
+            return gated
         client = get_client()
         result = await delete_bookmark(client, tweet_id)
-        return "✅ Bookmark eliminado." if result["success"] else "❌ No se pudo eliminar bookmark."
+        return "✅ Bookmark removed." if result["success"] else "❌ Could not remove the bookmark."
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_create_list(name: str, description: str = "", private: bool = False) -> str:
+    """Create an X List. Requires authentication."""
+    try:
+        params = {"name": name, "description": description, "private": private}
+        if gated := _draft_if_required("list_create", params):
+            return gated
+        result = await create_list(get_client(), name, description, private)
+        return f"✅ List created: {result['name']} (id {result['list_id']})" if result["success"] else "❌ Could not create the list."
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_add_list_member(list_id: str, username: str) -> str:
+    """Add a user to a List you own. Requires authentication. username: handle without @"""
+    try:
+        if gated := _draft_if_required("list_add", {"list_id": list_id, "username": username}):
+            return gated
+        client = get_client()
+        result = await list_add_member(client, list_id, await get_user_id(client, username))
+        return f"✅ @{username} added to list {list_id}." if result["success"] else f"❌ Could not add @{username}."
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_remove_list_member(list_id: str, username: str) -> str:
+    """Remove a user from a List you own. Requires authentication. username: handle without @"""
+    try:
+        if gated := _draft_if_required("list_remove", {"list_id": list_id, "username": username}):
+            return gated
+        client = get_client()
+        result = await list_remove_member(client, list_id, await get_user_id(client, username))
+        return f"✅ @{username} removed from list {list_id}." if result["success"] else f"❌ Could not remove @{username}."
     except Exception as e:
         return _fmt_error(e)
 
@@ -571,41 +671,53 @@ async def x_bulk_unfollow_non_followers(
     dry_run: bool = False,
 ) -> str:
     """
-    Hace unfollow masivo de todos los que no te siguen de vuelta.
-    ÚSALO CON CUIDADO — hace cambios reales en tu cuenta.
-    username: tu nombre de usuario sin @
-    limit: cuántos following revisar (default 200)
-    delay: segundos entre cada unfollow (default 2.0, no bajar de 1.0)
-    dry_run: si es True solo muestra quién sería unfollowed, sin hacer nada
+    Unfollow everyone who does not follow you back.
+    USE WITH CARE — this makes real changes to your account.
+    username: your handle without @
+    limit: how many followed accounts to check (default 200)
+    delay: seconds between unfollows (default 2.0, don't go below 1.0)
+    dry_run: if True, only show who would be unfollowed without doing anything
     """
     try:
         client = get_client()
         non_followers = await scrape_non_followers(client, username, limit=limit)
 
         if not non_followers:
-            return "✅ ¡Todos tus following te siguen de vuelta! No hay nada que hacer."
+            return "✅ Everyone you follow follows you back. Nothing to do."
 
         user_ids = [u["id"] for u in non_followers if u.get("id")]
         names = [f"@{u['username']}" for u in non_followers[:5]]
         preview = ", ".join(names)
         if len(non_followers) > 5:
-            preview += f" y {len(non_followers) - 5} más..."
+            preview += f" and {len(non_followers) - 5} more..."
 
         if dry_run:
             return (
-                f"🔍 DRY-RUN — no se hizo ningún unfollow.\n"
-                f"  Se haría unfollow de: {len(user_ids)} usuarios\n"
-                f"  Primeros: {preview}"
+                f"🔍 DRY-RUN — nothing was unfollowed.\n"
+                f"  Would unfollow: {len(user_ids)} users\n"
+                f"  First: {preview}"
+            )
+
+        if approval_required():
+            ids = [
+                create_draft("unfollow", {"user_id": u["id"], "username": u.get("username")})["id"]
+                for u in non_followers
+                if u.get("id")
+            ]
+            return (
+                f"📝 Approval required: saved {len(ids)} unfollow draft(s); nothing was sent to X.\n"
+                f"  Users: {preview}\n"
+                "  A human must review them with: xactions drafts list"
             )
 
         result = await bulk_unfollow(client, user_ids, delay_seconds=delay)
 
         return (
-            f"✅ Unfollow masivo completado.\n"
+            f"✅ Bulk unfollow finished.\n"
             f"  Total:   {result['total']}\n"
-            f"  Éxitos:  {result['success']}\n"
-            f"  Fallos:  {result['failed']}\n"
-            f"  Usuarios: {preview}"
+            f"  Succeeded: {result['success']}\n"
+            f"  Failed:  {result['failed']}\n"
+            f"  Users: {preview}"
         )
     except Exception as e:
         return _fmt_error(e)
@@ -619,20 +731,6 @@ async def x_list_drafts(status: str = "pending") -> str:
 
         items = list_drafts(status=status or None)
         return json.dumps({"count": len(items), "drafts": items}, ensure_ascii=False, indent=2)
-    except Exception as e:
-        return _fmt_error(e)
-
-
-@mcp.tool()
-async def x_approve_draft(draft_id: str) -> str:
-    """Mark a draft as approved (does not execute; use CLI drafts approve to run)."""
-    try:
-        from .drafts import approve
-
-        d = approve(draft_id)
-        if not d:
-            return f"Draft not found: {draft_id}"
-        return f"✅ Draft {draft_id} approved. Run via: xactions drafts approve {draft_id}"
     except Exception as e:
         return _fmt_error(e)
 
@@ -653,9 +751,17 @@ async def x_discard_draft(draft_id: str) -> str:
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    from .mcp_groups import apply_env_filter_to_mcp
+# Applied at import time so the filter holds however the server is launched
+# (`python -m`, `mcp run`, the `xactions-mcp` script, or an embedding host).
+from .mcp_groups import apply_env_filter_to_mcp
 
-    kept = apply_env_filter_to_mcp(mcp)
-    logging.getLogger(__name__).info("MCP tools advertised: %d", len(kept))
+ADVERTISED_TOOLS = apply_env_filter_to_mcp(mcp)
+
+
+def main() -> None:
+    logging.getLogger(__name__).info("MCP tools advertised: %d", len(ADVERTISED_TOOLS))
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

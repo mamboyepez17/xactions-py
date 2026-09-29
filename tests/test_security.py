@@ -1,4 +1,4 @@
-"""Tests del manejo seguro de cookies."""
+"""Tests for safe cookie handling."""
 
 import os
 
@@ -23,8 +23,8 @@ def test_redact_cookies_hides_values():
 
 
 def test_redact_cookies_empty():
-    assert redact_cookies(None) == "(vacío)"
-    assert redact_cookies("") == "(vacío)"
+    assert redact_cookies(None) == "(empty)"
+    assert redact_cookies("") == "(empty)"
 
 
 def test_redact_in_text_message():
@@ -45,8 +45,8 @@ def test_cookies_in_argv_detects_flag():
 
 def test_warn_cli_cookies_returns_message():
     assert warn_cli_cookies("") is None
-    msg = warn_cli_cookies("auth_token=a")  # sin argv real, puede no avisar
-    # cookies_in_argv() usa sys.argv de pytest — no asumimos True
+    msg = warn_cli_cookies("auth_token=a")  # without a real argv it may not warn
+    # cookies_in_argv() sees pytest's sys.argv — don't assume True
     assert msg is None or isinstance(msg, str)
 
 
@@ -72,7 +72,7 @@ def test_check_file_permissions_warns_when_world_readable(tmp_path):
 
 def test_check_file_permissions_windows_noop(tmp_path):
     if os.name != "nt":
-        pytest.skip("solo Windows")
+        pytest.skip("Windows only")
     p = tmp_path / "cookies.txt"
     p.write_text("auth_token=a; ct0=b\n", encoding="utf-8")
     assert check_cookies_file_permissions(p) is None
@@ -82,11 +82,11 @@ def test_safe_cookie_summary_no_secrets():
     summary = safe_cookie_summary(["auth_token=SECRET1; ct0=S2", "auth_token=SECRET3; ct0=S4"])
     assert "SECRET1" not in summary
     assert "SECRET3" not in summary
-    assert "2 cuenta" in summary
+    assert "2 account" in summary
 
 
 def test_client_error_path_redacts(caplog):
-    """Un AuthError con cookie pegada no debe filtrar el valor al formatear."""
+    """An AuthError carrying a cookie must not leak its value when formatted."""
     from xactions.cli import _safe_error_message
 
     class FakeErr(Exception):

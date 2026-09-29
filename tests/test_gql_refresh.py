@@ -1,4 +1,4 @@
-"""Tests offline del parser y cache de GraphQL query IDs."""
+"""Offline tests for the GraphQL query ID parser and cache."""
 
 import json
 from pathlib import Path
@@ -63,9 +63,9 @@ def test_extract_operations_both_orders():
     ops = extract_operations(FAKE_JS)
     assert ops["UserByScreenName"]["queryId"] == "NimuplG1OB7Fd2btCLdBOw"
     assert ops["SearchTimeline"]["queryId"] == "NEWSEARCHID1234567890"
-    # operationName antes de queryId
+    # operationName before queryId
     assert ops["CreateTweet"]["queryId"] == "NEWCREATETWEETID1234"
-    # operationName distinto del key del store (Likes vs UserLikes)
+    # operationName differs from the store key (Likes vs UserLikes)
     assert ops["Likes"]["queryId"] == "LikesID1234567890123"
 
 
@@ -178,7 +178,7 @@ async def test_discover_from_bundles(tmp_path: Path):
 
 @respx.mock
 async def test_refresh_prefers_auth_bundle_and_falls_back_to_twikit(tmp_path: Path):
-    """Sin cookie → twikit. Con cookie → bundle logueado manda."""
+    """No cookie → twikit. With a cookie → the logged-in bundle wins."""
     from xactions.gql_refresh import refresh_endpoints
 
     respx.get("https://x.com").mock(return_value=httpx.Response(200, text=FAKE_HTML))
@@ -198,13 +198,13 @@ async def test_refresh_prefers_auth_bundle_and_falls_back_to_twikit(tmp_path: Pa
         "CreateTweet": {"queryId": "oldcreate", "operationName": "CreateTweet"},
     }
 
-    # Sin cookies: bundles vacíos → twikit
+    # No cookies: empty bundles → twikit
     path1 = tmp_path / "a.json"
     merged = await refresh_endpoints(base, cache_path=path1, persist=True)
     assert merged["UserByScreenName"]["queryId"] == "TWIKITUSERID12345678"
     assert json.loads(path1.read_text(encoding="utf-8"))["source"] == "twikit"
 
-    # Con cookies: mockeamos que el HTML trae entry-client-logged-in con ops
+    # With cookies: mock HTML that ships entry-client-logged-in with ops
     logged_html = FAKE_HTML.replace(
         "entry-client-logged-out-Abc.js",
         "entry-client-logged-in-XYZ.js",
@@ -221,7 +221,7 @@ async def test_refresh_prefers_auth_bundle_and_falls_back_to_twikit(tmp_path: Pa
         persist=True,
         cookie="auth_token=abc; ct0=xyz",
     )
-    # FAKE_JS trae los IDs "reales" de UserByScreenName / SearchTimeline
+    # FAKE_JS carries the "real" UserByScreenName / SearchTimeline IDs
     assert merged2["UserByScreenName"]["queryId"] == "NimuplG1OB7Fd2btCLdBOw"
     assert merged2["SearchTimeline"]["queryId"] == "NEWSEARCHID1234567890"
     assert json.loads(path2.read_text(encoding="utf-8"))["source"] == "bundle-auth"

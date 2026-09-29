@@ -1,13 +1,13 @@
 """
 XActions-PY — ClientPool
-Pool de clientes con rotación de cookies (multi-cuenta).
+Client pool with cookie rotation (multi-account).
 
-Cuando una cuenta pega rate limit (429) o sus cookies mueren (401/403),
-el pool rota automáticamente a la siguiente cuenta disponible.
+When an account hits a rate limit (429) or its cookies die (401),
+the pool rotates to the next available account automatically.
 
-Uso:
+Usage:
     pool = ClientPool([cookies1, cookies2, cookies3])
-    profile = await scrape_profile(pool, "elonmusk")   # compatible con scrapers
+    profile = await scrape_profile(pool, "elonmusk")   # works with any scraper
     await pool.aclose()
 """
 
@@ -16,18 +16,18 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .client import AuthError, ForbiddenError, RateLimitError, TwitterClient, TwitterError
+from .client import AuthError, RateLimitError, TwitterClient, TwitterError
 
 _log = logging.getLogger(__name__)
 
 
 class ClientPool:
     """
-    Pool round-robin de TwitterClient.
+    Round-robin pool of TwitterClient.
 
-    Expone la misma interfaz que TwitterClient (`graphql`, `rest_get`,
-    `rest_post`, `is_authenticated`, `validate_cookies`, `aclose`), por lo
-    que puede pasarse a cualquier scraper/acción en lugar de un cliente.
+    Exposes the same interface as TwitterClient (`graphql`, `rest_get`,
+    `rest_post`, `is_authenticated`, `validate_cookies`, `aclose`), so it
+    can be passed to any scraper/action in place of a client.
     """
 
     def __init__(
@@ -41,18 +41,18 @@ class ClientPool:
             self._clients = list(clients)
         else:
             if not cookies_list:
-                raise ValueError("ClientPool requiere al menos un string de cookies")
+                raise ValueError("ClientPool needs at least one cookie string")
             self._clients = [
                 TwitterClient(cookies=c, proxy=proxy, max_retries=max_retries)
                 for c in cookies_list
                 if c and c.strip()
             ]
         if not self._clients:
-            raise ValueError("ClientPool quedó sin clientes válidos")
+            raise ValueError("ClientPool has no valid clients")
         self._idx = 0
         self._dead: set[int] = set()
 
-    # ─── Gestión del pool ─────────────────────────────────────────────────────
+    # ─── Pool management ──────────────────────────────────────────────────────
 
     @property
     def current(self) -> TwitterClient:
@@ -67,29 +67,29 @@ class ClientPool:
         return self.size - len(self._dead)
 
     def _rotate(self) -> None:
-        """Avanza a la siguiente cuenta viva. Lanza TwitterError si no hay ninguna."""
+        """Advance to the next live account. Raises TwitterError if none is left."""
         if self.alive <= 0:
-            raise TwitterError("Todas las cuentas del pool están agotadas (rate limit o cookies inválidas)")
+            raise TwitterError("Every account in the pool is exhausted (rate limited or invalid cookies)")
         for _ in range(self.size):
             self._idx = (self._idx + 1) % self.size
             if self._idx not in self._dead:
                 return
 
     def mark_dead(self) -> None:
-        """Marca la cuenta actual como inválida y rota."""
-        _log.warning("ClientPool: marcando cuenta #%d como muerta", self._idx)
+        """Mark the current account as dead and rotate."""
+        _log.warning("ClientPool: marking account #%d as dead", self._idx)
         self._dead.add(self._idx)
         self._rotate()
 
-    # ─── Interfaz compatible con TwitterClient ────────────────────────────────
+    # ─── TwitterClient-compatible interface ───────────────────────────────────
 
     def is_authenticated(self) -> bool:
         return self.current.is_authenticated()
 
     async def _execute(self, method_name: str, *args, **kwargs) -> Any:
         """
-        Ejecuta un método del cliente actual con rotación automática
-        ante rate limits y errores de autenticación.
+        Call a method on the current client, rotating automatically
+        on rate limits and authentication errors.
         """
         last_exc: Exception | None = None
         attempts = self.size
@@ -100,13 +100,16 @@ class ClientPool:
                 return await method(*args, **kwargs)
             except RateLimitError as e:
                 last_exc = e
-                _log.warning("ClientPool: rate limit en cuenta #%d, rotando", self._idx)
+                _log.warning("ClientPool: account #%d rate limited, rotating", self._idx)
                 self._rotate()
-            except (AuthError, ForbiddenError) as e:
+            except AuthError as e:
                 last_exc = e
                 self.mark_dead()
+            # ForbiddenError (403) is not caught: it usually means the *resource*
+            # is off-limits (protected account, blocked search), not that this
+            # account's session died, so rotating or killing the account is wrong.
 
-        raise last_exc or TwitterError("ClientPool: todas las cuentas fallaron")
+        raise last_exc or TwitterError("ClientPool: every account failed")
 
     async def graphql(self, *args, **kwargs) -> dict[str, Any]:
         return await self._execute("graphql", *args, **kwargs)
@@ -120,8 +123,11 @@ class ClientPool:
     async def rest_upload(self, *args, **kwargs) -> dict[str, Any]:
         return await self._execute("rest_upload", *args, **kwargs)
 
+    async def upload_request(self, *args, **kwargs) -> dict[str, Any]:
+        return await self._execute("upload_request", *args, **kwargs)
+
     async def validate_cookies(self) -> dict[str, Any]:
-        """Valida todas las cuentas del pool y devuelve el resumen."""
+        """Validate every account in the pool and return a summary."""
         results = []
         for i, client in enumerate(self._clients):
             if i in self._dead:
@@ -132,10 +138,10 @@ class ClientPool:
                 results.append({"account": i, **res})
                 if not res.get("valid"):
                     self._dead.add(i)
-            except Exception as e:  # noqa: BLE001 — validación best-effort
+            except Exception as e:  # noqa: BLE001 — best-effort validation
                 results.append({"account": i, "valid": False, "error": str(e)})
                 self._dead.add(i)
-        # Dejar el índice apuntando a una cuenta viva
+        # Leave the index pointing at a live account
         if self._idx in self._dead and self.alive > 0:
             self._rotate()
         return {
@@ -144,7 +150,7 @@ class ClientPool:
             "accounts": results,
         }
 
-    # ─── Ciclo de vida ────────────────────────────────────────────────────────
+    # ─── Lifecycle ───────────────────────────────────────────────────────────
 
     async def aclose(self) -> None:
         for client in self._clients:

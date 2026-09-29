@@ -1,0 +1,26 @@
+# Install once with: pre-commit install
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      # Use the project's own ruff/mypy so hooks match CI exactly.
+      - id: ruff
+        name: ruff
+        entry: python -m ruff check --fix
+        language: system
+        types: [python]
+      - id: mypy
+        name: mypy
+        entry: python -m mypy src
+        language: system
+        types: [python]
+        pass_filenames: false

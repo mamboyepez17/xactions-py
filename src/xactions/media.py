@@ -55,7 +55,7 @@ async def download_media(
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
     owns = client is None
-    if owns:
+    if client is None:
         client = httpx.AsyncClient(timeout=60.0, follow_redirects=True)
     downloaded: list[str] = []
     failed: list[dict[str, str]] = []

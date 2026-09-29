@@ -1,4 +1,4 @@
-"""Tests para el cliente HTTP de xactions-py."""
+"""Tests for the xactions-py HTTP client."""
 
 import asyncio
 
@@ -27,7 +27,7 @@ async def test_graphql_success(client):
         return_value=httpx.Response(200, json={"data": {"user": {"result": {"rest_id": "42"}}}})
     )
 
-    # Sobrescribimos endpoint para el test
+    # Override the endpoint for the test
     from xactions.client import GRAPHQL_ENDPOINTS
     old = GRAPHQL_ENDPOINTS["UserByScreenName"].copy()
     GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = "123"
@@ -117,57 +117,109 @@ async def test_network_retry():
         GRAPHQL_ENDPOINTS["UserByScreenName"].update(old)
 
 
-@respx.mock
-async def test_validate_cookies_via_graphql_home(client):
-    from xactions.client import GRAPHQL_ENDPOINTS
-
-    qid = GRAPHQL_ENDPOINTS["HomeLatestTimeline"]["queryId"]
-    respx.post(f"https://x.com/i/api/graphql/{qid}/HomeLatestTimeline").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "data": {
-                    "home": {
-                        "home_timeline_urt": {
-                            "instructions": [
+def _home_with_author(screen_name: str, rest_id: str) -> dict:
+    """Home timeline whose only tweet is by *another* account."""
+    return {
+        "data": {
+            "home": {
+                "home_timeline_urt": {
+                    "instructions": [
+                        {
+                            "type": "TimelineAddEntries",
+                            "entries": [
                                 {
-                                    "type": "TimelineAddEntries",
-                                    "entries": [
-                                        {
-                                            "entryId": "tweet-1",
-                                            "content": {
-                                                "itemContent": {
-                                                    "tweet_results": {
-                                                        "result": {
-                                                            "core": {
-                                                                "user_results": {
-                                                                    "result": {
-                                                                        "rest_id": "42",
-                                                                        "legacy": {
-                                                                            "screen_name": "test"
-                                                                        },
-                                                                    }
-                                                                }
+                                    "entryId": "tweet-1",
+                                    "content": {
+                                        "itemContent": {
+                                            "tweet_results": {
+                                                "result": {
+                                                    "core": {
+                                                        "user_results": {
+                                                            "result": {
+                                                                "rest_id": rest_id,
+                                                                "legacy": {"screen_name": screen_name},
                                                             }
                                                         }
                                                     }
                                                 }
-                                            },
+                                            }
                                         }
-                                    ],
+                                    },
                                 }
-                            ]
+                            ],
                         }
-                    }
+                    ]
                 }
-            },
+            }
+        }
+    }
+
+
+@respx.mock
+async def test_validate_cookies_identifies_viewer_from_twid():
+    from xactions.client import GRAPHQL_ENDPOINTS
+
+    client = TwitterClient(cookies="auth_token=abc; ct0=xyz; twid=u%3D42")
+    home_qid = GRAPHQL_ENDPOINTS["HomeLatestTimeline"]["queryId"]
+    me_qid = GRAPHQL_ENDPOINTS["UserByRestId"]["queryId"]
+    respx.post(f"https://x.com/i/api/graphql/{home_qid}/HomeLatestTimeline").mock(
+        return_value=httpx.Response(200, json=_home_with_author("someone_else", "999"))
+    )
+    me_route = respx.get(f"https://x.com/i/api/graphql/{me_qid}/UserByRestId").mock(
+        return_value=httpx.Response(
+            200, json={"data": {"user": {"result": {"rest_id": "42", "legacy": {"screen_name": "me"}}}}}
         )
     )
 
     result = await client.validate_cookies()
     assert result["valid"] is True
-    assert result["username"] == "test"
     assert result["user_id"] == "42"
+    assert result["username"] == "me"
+    assert "42" in me_route.calls.last.request.url.params["variables"]
+
+
+@respx.mock
+async def test_validate_cookies_without_twid_uses_account_settings(client):
+    from xactions.client import GRAPHQL_ENDPOINTS
+
+    qid = GRAPHQL_ENDPOINTS["HomeLatestTimeline"]["queryId"]
+    respx.post(f"https://x.com/i/api/graphql/{qid}/HomeLatestTimeline").mock(
+        return_value=httpx.Response(200, json=_home_with_author("someone_else", "999"))
+    )
+    respx.get("https://x.com/i/api/1.1/account/settings.json").mock(
+        return_value=httpx.Response(200, json={"screen_name": "me"})
+    )
+
+    result = await client.validate_cookies()
+    assert result["valid"] is True
+    assert result["username"] == "me"
+    assert result["user_id"] is None
+
+
+@respx.mock
+async def test_validate_cookies_never_reports_timeline_author(client):
+    from xactions.client import GRAPHQL_ENDPOINTS
+
+    qid = GRAPHQL_ENDPOINTS["HomeLatestTimeline"]["queryId"]
+    respx.post(f"https://x.com/i/api/graphql/{qid}/HomeLatestTimeline").mock(
+        return_value=httpx.Response(200, json=_home_with_author("someone_else", "999"))
+    )
+    respx.get("https://x.com/i/api/1.1/account/settings.json").mock(return_value=httpx.Response(404))
+
+    result = await client.validate_cookies()
+    assert result["valid"] is True
+    assert result["username"] is None
+    assert result["user_id"] is None
+
+
+def test_viewer_id_parses_twid():
+    assert TwitterClient(cookies="auth_token=a; twid=u%3D123").viewer_id() == "123"
+    assert TwitterClient(cookies="auth_token=a; twid=garbage").viewer_id() is None
+    assert TwitterClient(cookies="auth_token=a").viewer_id() is None
+
+
+def test_headers_do_not_advertise_brotli(client):
+    assert "br" not in client._build_headers()["Accept-Encoding"]
 
 
 async def test_parse_cookies_url_encoding():
@@ -192,7 +244,7 @@ async def test_mutation_not_retried_on_network_error():
     finally:
         GRAPHQL_ENDPOINTS["FavoriteTweet"].update(old)
 
-    # Las mutations no se reintentan para evitar acciones duplicadas.
+    # Mutations are not retried, to avoid duplicate actions.
     assert route.call_count == 1
 
 
@@ -220,8 +272,8 @@ async def test_csrf_token_updated_from_response(client):
 
 async def test_close_inside_running_loop_does_not_crash():
     client = TwitterClient(cookies="auth_token=a; ct0=b")
-    client.close()  # antes esto lanzaba RuntimeError desde un loop corriendo
-    await asyncio.sleep(0.01)  # deja correr la tarea de cierre programada
+    client.close()  # this used to raise RuntimeError from a running loop
+    await asyncio.sleep(0.01)  # let the scheduled close task run
     assert client._closed is True
 
 
