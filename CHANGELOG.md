@@ -20,7 +20,15 @@
 - `mypy src` is clean (was 46 errors): new `XClient` protocol shared by `TwitterClient` and `ClientPool`.
 - `TwitterClient.close()` no longer uses the deprecated `asyncio.get_event_loop()`.
 
+### Changed
+- **English everywhere**: CLI output and help, MCP tool descriptions and replies, error messages, logs, docstrings, comments and `.env.example` are now in English (the EN/ES sentiment lexicon is unchanged). Scripts that matched on the old Spanish messages need updating.
+- **`cli.py` split into a `cli/` package** (`read`, `analytics`, `write`, `monitor`, `system` + shared `_common`). Entry points and every command/option are unchanged.
+- `.gitignore` only ignores JSON/CSV output at the repo root, so fixtures and example pipelines can be versioned.
+- README shows the live CI badge instead of a hand-maintained test count.
+
 ### Added
+- Coverage report in CI with a 55% floor (`pytest-cov`).
+- `.pre-commit-config.yaml` (whitespace/YAML/TOML/private-key hooks + the project's ruff and mypy).
 - `mypy` in CI.
 - `xactions-mcp` console script.
 - `drafts.execute_draft()` shared executor (adds `retweet`, `unbookmark`, `post_thread` drafts).

@@ -1,4 +1,4 @@
-"""Tests para el tracking en SQLite."""
+"""Tests for SQLite tracking."""
 
 from xactions.db import TrackerDB, compute_profile_delta
 
@@ -15,7 +15,7 @@ def test_db_saves_and_reads_profile_snapshots(tmp_path):
 
     history = db.get_profile_history("elonmusk")
     assert len(history) == 2
-    # Orden descendente por fecha
+    # Newest first
     assert history[0]["followers"] == 150
 
 
@@ -24,7 +24,7 @@ def test_db_saves_tweet_snapshots(tmp_path):
     tweets = [
         {"id": "1", "author": {"username": "a"}, "likes": 10, "retweets": 1},
         {"id": "2", "author": {"username": "a"}, "likes": 20, "retweets": 2},
-        {"author": {"username": "a"}},  # sin id → se descarta
+        {"author": {"username": "a"}},  # no id → dropped
     ]
     saved = db.save_tweet_snapshots(tweets)
     assert saved == 2

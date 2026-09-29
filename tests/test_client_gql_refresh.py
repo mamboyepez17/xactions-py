@@ -1,4 +1,4 @@
-"""Tests del auto-refresh de query IDs en el cliente GraphQL."""
+"""Tests for query ID auto-refresh in the GraphQL client."""
 
 import httpx
 import pytest
@@ -10,7 +10,7 @@ from xactions.client import GRAPHQL_ENDPOINTS, NotFoundError, TwitterClient
 
 @pytest.fixture
 def reset_gql(monkeypatch):
-    """Aísla el store global y desactiva refresh en red real."""
+    """Isolate the global store and disable the real-network refresh."""
     monkeypatch.setattr(client_mod, "_NO_GQL_REFRESH", True)
     monkeypatch.setattr(client_mod, "_gql_refreshed_this_process", False)
     saved = {k: dict(v) for k, v in GRAPHQL_ENDPOINTS.items()}
@@ -21,7 +21,7 @@ def reset_gql(monkeypatch):
 
 @respx.mock
 async def test_stale_query_id_triggers_refresh_and_retry(reset_gql, monkeypatch):
-    """404 → refresh (mock) → retry con el queryId nuevo → 200."""
+    """404 → refresh (mock) → retry with the new queryId → 200."""
     GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = "STALE1234567890"
     old_id = "STALE1234567890"
     new_id = "FRESH9876543210123"
@@ -57,7 +57,7 @@ async def test_stale_query_id_triggers_refresh_and_retry(reset_gql, monkeypatch)
 
 @respx.mock
 async def test_plain_404_without_refresh_when_disabled(reset_gql, monkeypatch):
-    """Con refresh desactivado, un 404 sigue fallando sin tocar la red de refresh."""
+    """With refresh disabled, a 404 still fails without touching the refresh network."""
     GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = "STALE1234567890"
     respx.get("https://x.com/i/api/graphql/STALE1234567890/UserByScreenName").mock(
         return_value=httpx.Response(404, json={"error": "Not found"})
@@ -69,20 +69,20 @@ async def test_plain_404_without_refresh_when_disabled(reset_gql, monkeypatch):
         called["n"] += 1
         return GRAPHQL_ENDPOINTS
 
-    # _NO_GQL_REFRESH ya está True en el fixture; el cliente aún llama a refresh_graphql_endpoints,
-    # pero esa función devuelve sin red. Contamos invocaciones del wrapper del cliente.
+    # _NO_GQL_REFRESH is already True in the fixture; the client still calls refresh_graphql_endpoints,
+    # but that function returns without touching the network. Count the client's calls to it.
     monkeypatch.setattr(client_mod, "refresh_graphql_endpoints", fake_refresh)
 
     client = TwitterClient(cookies="auth_token=a; ct0=b", max_retries=0)
     with pytest.raises(NotFoundError):
         await client.graphql("UserByScreenName", variables={"screen_name": "t"})
-    # El cliente intenta un refresh; la función fake lo cuenta. El segundo intento vuelve a 404.
+    # The client tries one refresh; the fake counts it. The second attempt 404s again.
     assert called["n"] == 1
 
 
 @respx.mock
 async def test_graphql_body_stale_error_raises_not_found(reset_gql):
-    """Un error GraphQL con 'Query does not exist' se trata como NotFoundError."""
+    """A GraphQL 'Query does not exist' error is treated as NotFoundError."""
     GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = "STALE1234567890"
     respx.get("https://x.com/i/api/graphql/STALE1234567890/UserByScreenName").mock(
         return_value=httpx.Response(

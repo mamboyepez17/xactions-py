@@ -1,4 +1,4 @@
-"""Tests para parsers y scrapers de xactions-py."""
+"""Tests for xactions-py parsers and scrapers."""
 
 import httpx
 import pytest
@@ -186,7 +186,7 @@ async def test_get_user_id_uses_cache():
         uid2 = await get_user_id(client, "ElonMusk")  # case-insensitive cache hit
 
     assert uid1 == uid2 == "44196397"
-    assert route.call_count == 1  # el segundo lookup salió del cache
+    assert route.call_count == 1  # the second lookup came from the cache
 
 
 @respx.mock

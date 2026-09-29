@@ -39,7 +39,7 @@ from ._common import (
 @common_options
 @with_client
 def profile(client, username, output, csv_path, ndjson_path, table):
-    """Obtiene el perfil de un usuario."""
+    """Show a user's profile."""
     data = run(scrape_profile(client, username))
     flat = [{
         "id": data.get("id"),
@@ -57,88 +57,88 @@ def profile(client, username, output, csv_path, ndjson_path, table):
     else:
         click.echo(f"\n{'─'*50}")
         click.echo(f"  @{data.get('username')} — {data.get('name')}")
-        click.echo(f"  {'✓ Verificado' if data.get('verified') else 'No verificado'}")
+        click.echo(f"  {'✓ Verified' if data.get('verified') else 'Not verified'}")
         click.echo(f"  Bio: {data.get('bio', '')[:100]}")
         click.echo(f"  Followers: {data.get('followers', 0):,}")
         click.echo(f"  Following: {data.get('following', 0):,}")
         click.echo(f"  Tweets:    {data.get('tweets_count', 0):,}")
-        click.echo(f"  Ubicación: {data.get('location', 'N/A')}")
-        click.echo(f"  Creado:    {data.get('created_at', 'N/A')}")
+        click.echo(f"  Location:  {data.get('location', 'N/A')}")
+        click.echo(f"  Created:   {data.get('created_at', 'N/A')}")
         click.echo(f"{'─'*50}\n")
 
 
 @cli.command()
 @click.argument("username")
-@click.option("--limit", "-l", default=100, show_default=True, help="Máximo de usuarios")
+@click.option("--limit", "-l", default=100, show_default=True, help="Maximum users")
 @common_options
 @with_client
 def followers(client, username, limit, output, csv_path, ndjson_path, table):
-    """Lista los followers de un usuario."""
+    """List a user's followers."""
     data = run(scrape_followers(client, username, limit=limit))
     _handle_output(
         {"count": len(data), "followers": data},
         output, csv_path, ndjson_path,
         csv_data=_flatten_users(data),
         table_fn=print_users_table if table else None,
-        table_title=f"Followers de @{username}",
+        table_title=f"Followers of @{username}",
     )
 
 
 @cli.command()
 @click.argument("username")
-@click.option("--limit", "-l", default=100, show_default=True, help="Máximo de usuarios")
+@click.option("--limit", "-l", default=100, show_default=True, help="Maximum users")
 @common_options
 @with_client
 def following(client, username, limit, output, csv_path, ndjson_path, table):
-    """Lista los usuarios que sigue una cuenta."""
+    """List the accounts a user follows."""
     data = run(scrape_following(client, username, limit=limit))
     _handle_output(
         {"count": len(data), "following": data},
         output, csv_path, ndjson_path,
         csv_data=_flatten_users(data),
         table_fn=print_users_table if table else None,
-        table_title=f"Following de @{username}",
+        table_title=f"Following of @{username}",
     )
 
 
 @cli.command("non-followers")
 @click.argument("username")
-@click.option("--limit", "-l", default=200, show_default=True, help="Cuántos following revisar")
+@click.option("--limit", "-l", default=200, show_default=True, help="How many followed accounts to check")
 @common_options
 @with_client
 def non_followers_cmd(client, username, limit, output, csv_path, ndjson_path, table):
-    """Muestra quién no te sigue de vuelta."""
+    """Show who does not follow you back."""
     data = run(scrape_non_followers(client, username, limit=limit))
     _handle_output(
         {"count": len(data), "non_followers": data},
         output, csv_path, ndjson_path,
         csv_data=_flatten_users(data),
         table_fn=print_users_table if table else None,
-        table_title=f"No te siguen de vuelta (@{username})",
+        table_title=f"Not following back (@{username})",
     )
 
 
 @cli.command()
 @click.argument("username")
-@click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de tweets")
-@click.option("--replies", is_flag=True, help="Incluir respuestas")
+@click.option("--limit", "-l", default=50, show_default=True, help="Number of tweets")
+@click.option("--replies", is_flag=True, help="Include replies")
 @common_options
 @with_client
 def tweets(client, username, limit, replies, output, csv_path, ndjson_path, table):
-    """Obtiene los tweets recientes de un usuario."""
+    """Show a user's recent tweets."""
     data = run(scrape_tweets(client, username, limit=limit, include_replies=replies))
     _handle_output(
         {"count": len(data), "tweets": data},
         output, csv_path, ndjson_path,
         csv_data=_flatten_tweets(data),
         table_fn=print_tweets_table if table else None,
-        table_title=f"Tweets de @{username}",
+        table_title=f"Tweets by @{username}",
     )
 
 
 @cli.command()
 @click.argument("query", required=False, default="")
-@click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de resultados")
+@click.option("--limit", "-l", default=50, show_default=True, help="Number of results")
 @click.option("--mode", default="Top", type=click.Choice(["Latest", "Top"]), show_default=True)
 @click.option("--from", "from_user", default=None, help="Operador from:USERNAME")
 @click.option("--to", "to_user", default=None, help="Operador to:USERNAME")
@@ -157,7 +157,7 @@ def search(
     min_faves, min_retweets, lang, exclude_retweets, exclude_replies, filter_media,
     output, csv_path, ndjson_path, table,
 ):
-    """Busca tweets por query (acepta operadores avanzados)."""
+    """Search tweets (advanced operators supported)."""
     q = build_search_query(
         query,
         from_user=from_user,
@@ -172,24 +172,24 @@ def search(
         filter_media=filter_media,
     )
     if not q.strip():
-        raise click.ClickException("Query vacía: pasa un término o flags (--from, --lang, …)")
+        raise click.ClickException("Empty query: pass a search term or flags (--from, --lang, …)")
     data = run(search_tweets(client, q, limit=limit, mode=mode))
     _handle_output(
         {"query": q, "count": len(data), "tweets": data},
         output, csv_path, ndjson_path,
         csv_data=_flatten_tweets(data),
         table_fn=print_tweets_table if table else None,
-        table_title=f'Resultados: "{q}" ({mode})',
+        table_title=f'Results: "{q}" ({mode})',
     )
 
 
 @cli.command()
 @click.argument("tweet_id")
-@click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de replies")
+@click.option("--limit", "-l", default=50, show_default=True, help="Number of replies")
 @common_options
 @with_client
 def replies(client, tweet_id, limit, output, csv_path, ndjson_path, table):
-    """Obtiene replies/conversación de un tweet."""
+    """Show a tweet's replies/conversation."""
     data = run(get_tweet_replies(client, tweet_id, limit=limit))
     _handle_output(
         {"tweet_id": tweet_id, "count": len(data), "tweets": data},
@@ -202,61 +202,61 @@ def replies(client, tweet_id, limit, output, csv_path, ndjson_path, table):
 
 @cli.command()
 @click.argument("tweet_id")
-@click.option("--limit", "-l", default=100, show_default=True, help="Cantidad de usuarios")
+@click.option("--limit", "-l", default=100, show_default=True, help="Number of users")
 @common_options
 @with_client
 def likers(client, tweet_id, limit, output, csv_path, ndjson_path, table):
-    """Usuarios que dieron like a un tweet."""
+    """Users who liked a tweet."""
     data = run(get_tweet_favoriters(client, tweet_id, limit=limit))
     _handle_output(
         {"tweet_id": tweet_id, "count": len(data), "users": data},
         output, csv_path, ndjson_path,
         csv_data=_flatten_users(data),
         table_fn=print_users_table if table else None,
-        table_title=f"Likers de {tweet_id}",
+        table_title=f"Likers of {tweet_id}",
     )
 
 
 @cli.command()
 @click.argument("tweet_id")
-@click.option("--limit", "-l", default=100, show_default=True, help="Cantidad de usuarios")
+@click.option("--limit", "-l", default=100, show_default=True, help="Number of users")
 @common_options
 @with_client
 def retweeters(client, tweet_id, limit, output, csv_path, ndjson_path, table):
-    """Usuarios que hicieron retweet a un tweet."""
+    """Users who retweeted a tweet."""
     data = run(get_tweet_retweeters(client, tweet_id, limit=limit))
     _handle_output(
         {"tweet_id": tweet_id, "count": len(data), "users": data},
         output, csv_path, ndjson_path,
         csv_data=_flatten_users(data),
         table_fn=print_users_table if table else None,
-        table_title=f"Retweeters de {tweet_id}",
+        table_title=f"Retweeters of {tweet_id}",
     )
 
 
 @cli.command()
 @click.argument("username")
-@click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de tweets")
+@click.option("--limit", "-l", default=50, show_default=True, help="Number of tweets")
 @common_options
 @with_client
 def likes(client, username, limit, output, csv_path, ndjson_path, table):
-    """Tweets a los que les dio like un usuario."""
+    """Tweets a user liked."""
     data = run(get_user_likes(client, username, limit=limit))
     _handle_output(
         {"username": username, "count": len(data), "tweets": data},
         output, csv_path, ndjson_path,
         csv_data=_flatten_tweets(data),
         table_fn=print_tweets_table if table else None,
-        table_title=f"Likes de @{username}",
+        table_title=f"Likes by @{username}",
     )
 
 
 @cli.command()
-@click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de bookmarks")
+@click.option("--limit", "-l", default=50, show_default=True, help="Number of bookmarks")
 @common_options
 @with_client
 def bookmarks(client, limit, output, csv_path, ndjson_path, table):
-    """Bookmarks del usuario autenticado."""
+    """The authenticated user's bookmarks."""
     data = run(get_bookmarks(client, limit=limit))
     _handle_output(
         {"count": len(data), "bookmarks": data},
@@ -272,7 +272,7 @@ def bookmarks(client, limit, output, csv_path, ndjson_path, table):
 @common_options
 @with_client
 def trends(client, woeid, output, csv_path, ndjson_path, table):
-    """Trending topics de Twitter/X."""
+    """X trending topics."""
     data = run(get_trends(client, woeid=woeid))
     _handle_output(
         {"count": len(data), "trends": data},
@@ -284,12 +284,12 @@ def trends(client, woeid, output, csv_path, ndjson_path, table):
 
 
 @cli.command()
-@click.option("--limit", "-l", default=50, show_default=True, help="Cantidad de tweets")
-@click.option("--latest", is_flag=True, help="Usar HomeLatestTimeline en vez de HomeTimeline")
+@click.option("--limit", "-l", default=50, show_default=True, help="Number of tweets")
+@click.option("--latest", is_flag=True, help="Use HomeLatestTimeline instead of HomeTimeline")
 @common_options
 @with_client
 def home(client, limit, latest, output, csv_path, ndjson_path, table):
-    """Home timeline del usuario autenticado."""
+    """The authenticated user's home timeline."""
     data = run(get_home_timeline(client, limit=limit, latest=latest))
     _handle_output(
         {"count": len(data), "tweets": data},

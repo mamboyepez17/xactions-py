@@ -1,11 +1,11 @@
 """
 XActions-PY — Actions
 Like, unlike, follow, unfollow, tweet, retweet, delete, bookmark.
-Todo vía GraphQL interna o REST legacy. Requiere auth_token + ct0 en cookies.
+All via the internal GraphQL API or legacy REST. Requires auth_token + ct0 cookies.
 
 v1.2.0:
-  - Agregados create_bookmark / delete_bookmark.
-  - Mejor manejo de errores y cierre de cliente.
+  - Added create_bookmark / delete_bookmark.
+  - Better error handling and client shutdown.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ CAPS_ENABLED = True
 
 def _require_auth(client: XClient) -> None:
     if not client.is_authenticated():
-        raise AuthError("Se requiere autenticación. Configura auth_token y ct0.")
+        raise AuthError("Authentication required. Set auth_token and ct0.")
 
 
 def _account_key(client: Any) -> str:
@@ -61,22 +61,22 @@ def _after_write(client: Any, operation: str) -> None:
         data = record_write(data, operation, _account_key(client))
         save_caps(data)
     except (OSError, CapsFileError) as e:
-        _log.warning("No se pudo registrar write cap: %s", e)
+        _log.warning("Could not record write cap: %s", e)
 
 
 # ─── Media upload ─────────────────────────────────────────────────────────────
 
 async def upload_media(client: XClient, file_path: str) -> dict[str, Any]:
     """
-    Sube una imagen (jpg/png/gif/webp) a Twitter y devuelve su media_id.
-    Requiere auth. Límite simple upload: ~5MB por imagen.
-    (Los videos requieren chunked upload INIT/APPEND/FINALIZE — no soportado aún.)
+    Upload an image (jpg/png/gif/webp) to X and return its media_id.
+    Requires auth. Simple upload limit: ~5MB per image.
+    (Video needs chunked INIT/APPEND/FINALIZE upload — not supported yet.)
     """
     _require_auth(client)
     data = await client.rest_upload(f"{UPLOAD_BASE}/1.1/media/upload.json", file_path)
     media_id = data.get("media_id_string") or str(data.get("media_id", ""))
     if not media_id:
-        raise AuthError(f"No se obtuvo media_id: {data}")
+        raise AuthError(f"No media_id returned: {data}")
     return {"success": True, "media_id": media_id, "size": data.get("size")}
 
 
@@ -88,7 +88,7 @@ async def post_tweet(
     reply_to_id: str | None = None,
     media_ids: list | None = None,
 ) -> dict[str, Any]:
-    """Publica un tweet (con media opcional). Requiere auth."""
+    """Post a tweet (optionally with media). Requires auth."""
     _require_auth(client)
     _before_write(client, "tweet")
 
@@ -112,7 +112,7 @@ async def post_tweet(
             .get("tweet_results", {})
             .get("result", {})
     )
-    # TweetWithVisibilityResults anida el tweet real en .tweet
+    # TweetWithVisibilityResults nests the real tweet under .tweet
     if isinstance(result, dict) and result.get("__typename") == "TweetWithVisibilityResults":
         result = result.get("tweet") or {}
 
@@ -124,7 +124,7 @@ async def post_tweet(
             or (result.get("tweet") or {}).get("rest_id")
         )
 
-    # Errores GraphQL dentro del payload (sin HTTP error)
+    # GraphQL errors inside the payload (no HTTP error)
     errors = data.get("errors") or []
     error_msg = None
     if errors:
@@ -147,12 +147,12 @@ async def post_thread(
     delay_seconds: float = 1.5,
 ) -> dict[str, Any]:
     """
-    Publica un hilo: cada tweet responde al anterior.
-    Requiere auth. `delay_seconds` entre tweets para evitar rate limits.
+    Post a thread: each tweet replies to the previous one.
+    Requires auth. `delay_seconds` between tweets to avoid rate limits.
     """
     _require_auth(client)
     if not tweets:
-        return {"success": False, "tweet_ids": [], "error": "lista vacía"}
+        return {"success": False, "tweet_ids": [], "error": "empty list"}
 
     tweet_ids: list[str] = []
     reply_to: str | None = None
@@ -169,7 +169,7 @@ async def post_thread(
                 "failed_at": i,
                 "error": (
                     result.get("error")
-                    or f"No se pudo publicar el tweet {i + 1}/{len(tweets)}"
+                    or f"Could not post tweet {i + 1}/{len(tweets)}"
                 ),
             }
         _after_write(client, "thread_tweet")
@@ -292,7 +292,7 @@ async def delete_bookmark(client: XClient, tweet_id: str) -> dict[str, Any]:
 # ─── Follow / Unfollow ─────────────────────────────────────────────────────────
 
 async def follow_user(client: XClient, user_id: str) -> dict[str, Any]:
-    """Follow por user_id. Usa REST endpoint (no GraphQL mutation disponible)."""
+    """Follow by user_id. Uses the REST endpoint (no GraphQL mutation available)."""
     _require_auth(client)
     _before_write(client, "follow")
     data = await client.rest_post(
@@ -306,7 +306,7 @@ async def follow_user(client: XClient, user_id: str) -> dict[str, Any]:
 
 
 async def unfollow_user(client: XClient, user_id: str) -> dict[str, Any]:
-    """Unfollow por user_id."""
+    """Unfollow by user_id."""
     _require_auth(client)
     _before_write(client, "unfollow")
     data = await client.rest_post(
@@ -328,8 +328,8 @@ async def bulk_unfollow(
     on_progress: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     """
-    Hace unfollow masivo con delay entre cada acción para evitar rate limits.
-    on_progress: callback(current, total, user_id) opcional.
+    Unfollow many users with a delay between each to avoid rate limits.
+    on_progress: optional callback(current, total, user_id).
     """
     _require_auth(client)
     success = 0
@@ -350,7 +350,7 @@ async def bulk_unfollow(
             break
         except Exception as e:
             failed += 1
-            _log.warning("bulk_unfollow: falló user_id=%s (%s)", uid, e)
+            _log.warning("bulk_unfollow: failed user_id=%s (%s)", uid, e)
 
         if on_progress:
             on_progress(i + 1, len(user_ids), uid)

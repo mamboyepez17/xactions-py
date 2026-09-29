@@ -36,10 +36,10 @@ except PackageNotFoundError:
 
 def _load_cookies_list(cookies: str, cookies_file: str | None, from_browser: str | None = None) -> list[str]:
     """
-    Devuelve la lista de strings de cookies disponibles.
-    - --from-browser: lee auth_token/ct0 del navegador instalado
-    - --cookies-file: soporta cookie-string, Netscape, Cookie-Editor JSON, Playwright
-    - --cookies / TWITTER_COOKIES: una sola cookie, o varias separadas por '|||'
+    Return the available cookie strings.
+    - --from-browser: read auth_token/ct0 from an installed browser
+    - --cookies-file: cookie string, Netscape, Cookie-Editor JSON or Playwright
+    - --cookies / TWITTER_COOKIES: one cookie string, or several separated by '|||'
     """
     from ..browser_cookies import import_from_browser, load_cookies_from_file
 
@@ -47,15 +47,15 @@ def _load_cookies_list(cookies: str, cookies_file: str | None, from_browser: str
         imported = import_from_browser(from_browser)
         if not imported:
             raise click.ClickException(
-                f"No se pudieron importar cookies desde {from_browser}. "
-                "Exporta con Cookie-Editor y usa --cookies-file."
+                f"Could not import cookies from {from_browser}. "
+                "Export them with Cookie-Editor and use --cookies-file."
             )
         return [imported]
 
     raw: list[str] = []
     if cookies_file:
         if not os.path.exists(cookies_file):
-            raise click.ClickException(f"Archivo no encontrado: {cookies_file}")
+            raise click.ClickException(f"File not found: {cookies_file}")
         perm_warn = check_cookies_file_permissions(cookies_file)
         if perm_warn:
             click.echo(f"⚠️  {perm_warn}", err=True)
@@ -76,7 +76,7 @@ def get_client(
     cookies_file: str | None = None,
     from_browser: str | None = None,
 ) -> AnyClient:
-    """Devuelve un TwitterClient (1 cookie) o un ClientPool (varias)."""
+    """Return a TwitterClient (one cookie) or a ClientPool (several)."""
     cookie_list = _load_cookies_list(cookies, cookies_file, from_browser=from_browser)
     cli_warn = warn_cli_cookies(cookies)
     if cli_warn:
@@ -88,15 +88,15 @@ def get_client(
 
 
 def _safe_error_message(e: Exception) -> str:
-    """Mensaje de error sin valores de cookies (por si vienen en el texto)."""
+    """Error message with any cookie values redacted."""
     return redact_in_text(str(e))
 
 
 def with_client(func):
     """
-    Decorador para comandos: extrae --cookies/--cookies-file de los kwargs,
-    crea el client (o pool), lo inyecta como primer argumento, maneja errores
-    y garantiza el cierre de conexiones.
+    Command decorator: pops --cookies/--cookies-file from kwargs, builds the
+    client (or pool), injects it as the first argument, reports errors and
+    always closes the connections.
     """
 
     @functools.wraps(func)
@@ -134,14 +134,14 @@ def print_json(data: Any, output: str | None = None):
     if output:
         with open(output, "w", encoding="utf-8") as f:
             f.write(out)
-        click.echo(f"✅ Guardado en {output}")
+        click.echo(f"✅ Saved to {output}")
     else:
         click.echo(out)
 
 
 def _write_csv(path: str, rows: list[dict[str, Any]], fieldnames: list[str] | None = None):
     if not rows:
-        click.echo("⚠️  No hay datos para exportar a CSV.")
+        click.echo("⚠️  No data to export to CSV.")
         return
     if fieldnames is None:
         fieldnames = list(rows[0].keys())
@@ -149,17 +149,17 @@ def _write_csv(path: str, rows: list[dict[str, Any]], fieldnames: list[str] | No
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
-    click.echo(f"✅ CSV guardado en {path}")
+    click.echo(f"✅ CSV saved to {path}")
 
 
 def _write_ndjson(path: str, rows: list[dict[str, Any]]):
     if not rows:
-        click.echo("⚠️  No hay datos para exportar a NDJSON.")
+        click.echo("⚠️  No data to export to NDJSON.")
         return
     with open(path, "w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    click.echo(f"✅ NDJSON guardado en {path}")
+    click.echo(f"✅ NDJSON saved to {path}")
 
 
 def _flatten_users(users: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -219,7 +219,7 @@ def _handle_output(
 def print_users_table(users: list[dict[str, Any]], title: str = ""):
     if title:
         click.echo(f"\n{'─'*50}")
-        click.echo(f"  {title} ({len(users)} usuarios)")
+        click.echo(f"  {title} ({len(users)} users)")
         click.echo(f"{'─'*50}")
     for u in users:
         verified = "✓" if u.get("verified") else " "
@@ -263,9 +263,9 @@ def print_trends_table(trends: list[dict[str, Any]], title: str = ""):
 def print_analysis(report: dict[str, Any], username: str):
     avg = report["averages"]
     click.echo(f"\n{'═'*55}")
-    click.echo(f"  📊 Análisis de @{username} — {report['total_tweets']} tweets")
+    click.echo(f"  📊 Analysis of @{username} — {report['total_tweets']} tweets")
     click.echo(f"{'═'*55}")
-    click.echo("  Promedios por tweet:")
+    click.echo("  Averages per tweet:")
     click.echo(f"    ❤ {avg.get('likes', 0):>10,.1f}   🔁 {avg.get('retweets', 0):>8,.1f}   "
                f"💬 {avg.get('replies', 0):>6,.1f}   👁 {avg.get('views', 0):>10,.1f}")
     if report.get("engagement_rate_followers") is not None:
@@ -275,16 +275,16 @@ def print_analysis(report: dict[str, Any], username: str):
 
     content = report.get("content", {})
     if content:
-        click.echo(f"\n  Contenido: {content.get('with_media_pct', 0)}% con media, "
+        click.echo(f"\n  Content: {content.get('with_media_pct', 0)}% with media, "
                    f"{content.get('replies_pct', 0)}% replies, "
                    f"{content.get('quotes_pct', 0)}% quotes")
 
     if report.get("best_hours"):
         hours = ", ".join(f"{h['hour']:02d}:00" for h in report["best_hours"])
-        click.echo(f"  Mejores horas (UTC): {hours}")
+        click.echo(f"  Best hours (UTC): {hours}")
     if report.get("best_days"):
         days = ", ".join(d["day"] for d in report["best_days"])
-        click.echo(f"  Mejores días:        {days}")
+        click.echo(f"  Best days:        {days}")
 
     if report.get("top_tweets"):
         click.echo("\n  🏆 Top tweets:")
@@ -294,12 +294,12 @@ def print_analysis(report: dict[str, Any], username: str):
 
 
 def common_options(fn):
-    """Opciones comunes para comandos de lectura."""
+    """Options shared by the read commands."""
     fn = click.option(
         "--cookies",
         envvar=COOKIES_ENV,
         default="",
-        help="Cookies de sesión (preferir .env TWITTER_COOKIES o --cookies-file)",
+        help="Session cookies (prefer .env TWITTER_COOKIES or --cookies-file)",
     )(fn)
     fn = click.option("--cookies-file", type=click.Path(exists=True), default=None,
                       help="Cookie file (line format, Netscape, Cookie-Editor JSON)")(fn)
@@ -309,8 +309,8 @@ def common_options(fn):
         default=None,
         help="Import auth_token/ct0 from an installed browser profile",
     )(fn)
-    fn = click.option("--output", "-o", default=None, help="Archivo JSON de salida")(fn)
-    fn = click.option("--csv", "csv_path", default=None, help="Archivo CSV de salida")(fn)
-    fn = click.option("--ndjson", "ndjson_path", default=None, help="Archivo NDJSON de salida")(fn)
-    fn = click.option("--table", is_flag=True, help="Mostrar como tabla en vez de JSON")(fn)
+    fn = click.option("--output", "-o", default=None, help="Output JSON file")(fn)
+    fn = click.option("--csv", "csv_path", default=None, help="Output CSV file")(fn)
+    fn = click.option("--ndjson", "ndjson_path", default=None, help="Output NDJSON file")(fn)
+    fn = click.option("--table", is_flag=True, help="Show as a table instead of JSON")(fn)
     return fn

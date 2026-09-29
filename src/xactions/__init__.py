@@ -1,4 +1,4 @@
-"""xactions — X/Twitter automation toolkit (sin npm, sin Puppeteer)."""
+"""xactions — X/Twitter automation toolkit (no npm, no Puppeteer)."""
 
 from importlib.metadata import PackageNotFoundError, version
 

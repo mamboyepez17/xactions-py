@@ -1,13 +1,13 @@
 """
 XActions-PY — Analytics
-Análisis de engagement sobre tweets scrapeados. Puro stdlib, sin dependencias.
+Engagement analysis of scraped tweets. Pure stdlib, no dependencies.
 
-Métricas calculadas:
-  - Promedios de likes, retweets, replies, quotes, views por tweet
-  - Engagement rate (por followers y por views)
-  - Top tweets por engagement
-  - Mejores horas y días de la semana para publicar
-  - Ratios de contenido (con media, replies, quotes)
+Metrics:
+  - Average likes, retweets, replies, quotes, views per tweet
+  - Engagement rate (per follower and per view)
+  - Top tweets by engagement
+  - Best hours and weekdays to post
+  - Content ratios (with media, replies, quotes)
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ TWEET_DATE_FORMAT = "%a %b %d %H:%M:%S %z %Y"
 
 
 def parse_tweet_date(created_at: str | None) -> datetime | None:
-    """Parsea el formato de fecha de Twitter: 'Mon Jun 21 12:00:00 +0000 2026'."""
+    """Parse X's date format: 'Mon Jun 21 12:00:00 +0000 2026'."""
     if not created_at:
         return None
     try:
@@ -29,7 +29,7 @@ def parse_tweet_date(created_at: str | None) -> datetime | None:
 
 
 def _engagement_score(tweet: dict[str, Any]) -> int:
-    """Score de engagement ponderado: replies y quotes pesan más que likes."""
+    """Weighted engagement score: replies and quotes weigh more than likes."""
     return (
         (tweet.get("likes") or 0)
         + (tweet.get("retweets") or 0) * 2
@@ -49,11 +49,11 @@ def analyze_tweets(
     top_n: int = 5,
 ) -> dict[str, Any]:
     """
-    Analiza una lista de tweets y devuelve un reporte de engagement.
+    Analyze a list of tweets and return an engagement report.
 
-    tweets: lista de tweets en formato XActions (ver parse_tweet).
-    profile: perfil del autor (opcional, mejora el engagement rate).
-    top_n: cuántos top tweets incluir.
+    tweets: tweets in XActions format (see parse_tweet).
+    profile: author profile (optional, improves the engagement rate).
+    top_n: how many top tweets to include.
     """
     if not tweets:
         return {
@@ -83,7 +83,7 @@ def analyze_tweets(
         "bookmarks": _avg(bookmarks),
     }
 
-    # Engagement rate = engagement promedio por tweet / alcance.
+    # Engagement rate = average engagement per tweet / reach.
     per_tweet_engagement = [
         lk + rt + rp + qt for lk, rt, rp, qt in zip(likes, retweets, replies, quotes)
     ]
@@ -100,7 +100,7 @@ def analyze_tweets(
             (sum(likes) + sum(retweets) + sum(replies) + sum(quotes)) / total_views * 100, 4
         )
 
-    # Top tweets por engagement score
+    # Top tweets by engagement score
     scored = sorted(tweets, key=_engagement_score, reverse=True)
     top_tweets = [
         {
@@ -116,7 +116,7 @@ def analyze_tweets(
         for t in scored[:top_n]
     ]
 
-    # Mejores horas / días (por engagement acumulado)
+    # Best hours / days (by accumulated engagement)
     hour_engagement: dict[int, int] = {}
     day_engagement: dict[str, int] = {}
     dated = 0
@@ -161,7 +161,7 @@ def compare_accounts(
     tweets_b: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """
-    Compara dos cuentas lado a lado (perfil + engagement de tweets recientes).
+    Compare two accounts side by side (profile + recent tweet engagement).
     """
     report_a = analyze_tweets(tweets_a, profile=profile_a)
     report_b = analyze_tweets(tweets_b, profile=profile_b)

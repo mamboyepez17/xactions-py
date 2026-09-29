@@ -36,14 +36,14 @@ from ._common import (
 
 @cli.command()
 @click.argument("text")
-@click.option("--reply-to", default=None, help="ID del tweet al que responder")
+@click.option("--reply-to", default=None, help="ID of the tweet to reply to")
 @click.option("--media", "media_files", multiple=True, type=click.Path(exists=True),
-              help="Imagen a adjuntar (se puede repetir, máx 4)")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+              help="Image to attach (repeatable, max 4)")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def post(client, text, reply_to, media_files):
-    """Publica un tweet. Requiere auth_token."""
+    """Post a tweet. Requires auth_token."""
     from ..drafts import approval_required, create_draft
 
     if approval_required():
@@ -65,31 +65,31 @@ def post(client, text, reply_to, media_files):
         for path in media_files[:4]:
             up = await upload_media(client, path)
             media_ids.append(up["media_id"])
-            click.echo(f"📎 Media subida: {path} (id {up['media_id']})")
+            click.echo(f"📎 Media uploaded: {path} (id {up['media_id']})")
         return await post_tweet(client, text, reply_to_id=reply_to, media_ids=media_ids)
 
     result = run(_post())
     if result["success"]:
-        click.echo(f"✅ Tweet publicado! ID: {result['tweet_id']}")
+        click.echo(f"✅ Tweet posted! ID: {result['tweet_id']}")
     else:
-        click.echo(f"❌ No se pudo publicar. {result.get('error') or ''}", err=True)
+        click.echo(f"❌ Could not post. {result.get('error') or ''}", err=True)
         sys.exit(1)
 
 
 @cli.command()
 @click.argument("tweets", nargs=-1)
 @click.option("--from-file", type=click.Path(exists=True), default=None,
-              help="Archivo de texto: un tweet por línea o separados por ---")
-@click.option("--delay", default=1.5, show_default=True, help="Segundos entre tweets del hilo")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+              help="Text file: one tweet per line, or tweets separated by ---")
+@click.option("--delay", default=1.5, show_default=True, help="Seconds between thread tweets")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def thread(client, tweets, from_file, delay):
-    """Publica un hilo. Cada argumento es un tweet, o usa --from-file."""
+    """Post a thread. Each argument is a tweet, or use --from-file."""
     parts: list[str] = []
     if from_file:
         raw = open(from_file, encoding="utf-8").read()
-        # separar por --- o saltos dobles si no hay ---
+        # split on ---, or on blank lines if there is no ---
         if "\n---\n" in raw or raw.strip().startswith("---"):
             chunks = [c.strip() for c in re.split(r"\n?---\n?", raw) if c.strip()]
         else:
@@ -98,36 +98,36 @@ def thread(client, tweets, from_file, delay):
     parts.extend(t.strip() for t in tweets if t and t.strip())
 
     if not parts:
-        raise click.ClickException("Pasa tweets como argumentos o usa --from-file")
+        raise click.ClickException("Pass tweets as arguments or use --from-file")
 
-    click.echo(f"🧵 Publicando hilo de {len(parts)} tweets…")
+    click.echo(f"🧵 Posting a {len(parts)}-tweet thread…")
     result = run(post_thread(client, parts, delay_seconds=delay))
     if result["success"]:
-        click.echo(f"✅ Hilo publicado. Root: {result['root_id']} ({result['count']} tweets)")
+        click.echo(f"✅ Thread posted. Root: {result['root_id']} ({result['count']} tweets)")
     else:
         click.echo(f"❌ {result.get('error', 'Error')}", err=True)
         if result.get("tweet_ids"):
-            click.echo(f"   Publicados parcialmente: {', '.join(result['tweet_ids'])}", err=True)
+            click.echo(f"   Partially posted: {', '.join(result['tweet_ids'])}", err=True)
         sys.exit(1)
 
 @cli.command()
 @click.argument("tweet_id")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def delete(client, tweet_id):
-    """Elimina un tweet por ID. Requiere auth_token."""
+    """Delete a tweet by ID. Requires auth_token."""
     result = run(delete_tweet(client, tweet_id))
-    click.echo("✅ Tweet eliminado." if result["success"] else "❌ No se pudo eliminar.")
+    click.echo("✅ Tweet deleted." if result["success"] else "❌ Could not delete.")
 
 
 @cli.command()
 @click.argument("tweet_id")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def like(client, tweet_id):
-    """Da like a un tweet. Requiere auth_token."""
+    """Like a tweet. Requires auth_token."""
     from ..drafts import approval_required, create_draft
 
     if approval_required():
@@ -135,96 +135,96 @@ def like(client, tweet_id):
         click.echo(f"📝 Draft saved: {draft['id']} — approve with: xactions drafts approve {draft['id']}")
         return
     result = run(like_tweet(client, tweet_id))
-    click.echo("✅ Like dado." if result["success"] else "❌ Error dando like.")
+    click.echo("✅ Liked." if result["success"] else "❌ Could not like.")
 
 
 @cli.command()
 @click.argument("tweet_id")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def unlike(client, tweet_id):
-    """Quita el like de un tweet. Requiere auth_token."""
+    """Remove a like. Requires auth_token."""
     result = run(unlike_tweet(client, tweet_id))
-    click.echo("✅ Like quitado." if result["success"] else "❌ Error quitando like.")
+    click.echo("✅ Like removed." if result["success"] else "❌ Could not remove the like.")
 
 
 @cli.command()
 @click.argument("tweet_id")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def bookmark(client, tweet_id):
-    """Agrega un tweet a bookmarks. Requiere auth_token."""
+    """Bookmark a tweet. Requires auth_token."""
     result = run(create_bookmark(client, tweet_id))
-    click.echo("✅ Bookmark agregado." if result["success"] else "❌ Error agregando bookmark.")
+    click.echo("✅ Bookmarked." if result["success"] else "❌ Could not bookmark.")
 
 
 @cli.command()
 @click.argument("tweet_id")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def unbookmark(client, tweet_id):
-    """Elimina un tweet de bookmarks. Requiere auth_token."""
+    """Remove a bookmark. Requires auth_token."""
     result = run(delete_bookmark(client, tweet_id))
-    click.echo("✅ Bookmark eliminado." if result["success"] else "❌ Error eliminando bookmark.")
+    click.echo("✅ Bookmark removed." if result["success"] else "❌ Could not remove the bookmark.")
 
 
 @cli.command()
 @click.argument("username")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def follow(client, username):
-    """Sigue a un usuario. Requiere auth_token."""
+    """Follow a user. Requires auth_token."""
     user_id = run(get_user_id(client, username))
     result = run(follow_user(client, user_id))
-    click.echo(f"✅ Siguiendo a @{username}." if result["success"] else f"❌ Error siguiendo a @{username}.")
+    click.echo(f"✅ Following @{username}." if result["success"] else f"❌ Could not follow @{username}.")
 
 
 @cli.command()
 @click.argument("username")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def unfollow(client, username):
-    """Deja de seguir a un usuario. Requiere auth_token."""
+    """Unfollow a user. Requires auth_token."""
     user_id = run(get_user_id(client, username))
     result = run(unfollow_user(client, user_id))
-    click.echo(f"✅ Unfollow de @{username}." if result["success"] else f"❌ Error en unfollow de @{username}.")
+    click.echo(f"✅ Unfollowed @{username}." if result["success"] else f"❌ Could not unfollow @{username}.")
 
 
 @cli.command("bulk-unfollow")
 @click.argument("username")
-@click.option("--limit", "-l", default=200, show_default=True, help="Cuántos following revisar")
-@click.option("--delay", default=2.0, show_default=True, help="Segundos entre unfollows")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-@click.option("--dry-run", is_flag=True, help="Solo muestra quién sería unfollowed, sin hacer nada")
+@click.option("--limit", "-l", default=200, show_default=True, help="How many followed accounts to check")
+@click.option("--delay", default=2.0, show_default=True, help="Seconds between unfollows")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
+@click.option("--dry-run", is_flag=True, help="Only show who would be unfollowed; change nothing")
 @with_client
 def bulk_unfollow_cmd(client, username, limit, delay, dry_run):
     """
-    Unfollow masivo de cuentas que no te siguen de vuelta.
-    ⚠️  Usa --dry-run primero para ver qué pasaría.
+    Unfollow every account that does not follow you back.
+    ⚠️  Run with --dry-run first to see what would happen.
     """
     try:
         non_followers = run(scrape_non_followers(client, username, limit=limit))
 
         if not non_followers:
-            click.echo("✅ ¡Todos tus following te siguen de vuelta!")
+            click.echo("✅ Everyone you follow follows you back!")
             return
 
-        click.echo(f"\n📋 Encontrados {len(non_followers)} no-followers:")
+        click.echo(f"\n📋 Found {len(non_followers)} non-followers:")
         print_users_table(non_followers[:10])
         if len(non_followers) > 10:
-            click.echo(f"  ... y {len(non_followers) - 10} más")
+            click.echo(f"  ... and {len(non_followers) - 10} more")
 
         if dry_run:
-            click.echo("\n🔍 Dry-run: no se hizo nada. Remueve --dry-run para ejecutar.")
+            click.echo("\n🔍 Dry-run: nothing was changed. Drop --dry-run to execute.")
             return
 
-        click.confirm(f"\n⚠️  ¿Hacer unfollow de {len(non_followers)} usuarios?", abort=True)
+        click.confirm(f"\n⚠️  Unfollow {len(non_followers)} users?", abort=True)
 
         user_ids = [u["id"] for u in non_followers if u.get("id")]
 
@@ -235,11 +235,11 @@ def bulk_unfollow_cmd(client, username, limit, delay, dry_run):
             result = run(bulk_unfollow(client, user_ids, delay_seconds=delay, on_progress=on_progress))
 
         click.echo(
-            f"\n✅ Completado: {result['success']} éxitos, {result['failed']} fallos de {result['total']} total."
+            f"\n✅ Done: {result['success']} succeeded, {result['failed']} failed, {result['total']} total."
         )
 
     except click.Abort:
-        click.echo("\nCancelado.")
+        click.echo("\nCancelled.")
 
 @cli.command()
 @click.argument("query")

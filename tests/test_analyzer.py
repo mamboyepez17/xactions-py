@@ -1,4 +1,4 @@
-"""Tests para el módulo de analytics."""
+"""Tests for the analytics module."""
 
 from xactions.analyzer import analyze_tweets, parse_tweet_date
 
@@ -49,7 +49,7 @@ def test_analyze_averages_and_rates():
     assert report["total_tweets"] == 2
     assert report["averages"]["likes"] == 20.0
     assert report["averages"]["views"] == 2000.0
-    # avg engagement por tweet = (13 + 33) / 2 = 23 → 23/1000*100 = 2.3%
+    # avg engagement per tweet = (13 + 33) / 2 = 23 → 23/1000*100 = 2.3%
     assert report["engagement_rate_followers"] == 2.3
     assert report["engagement_rate_views"] is not None
 

@@ -19,26 +19,26 @@ from ._common import (
 
 
 @cli.command()
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def validate(client):
-    """Valida que las cookies funcionan contra la API (todas las del pool)."""
+    """Check that the cookies work against the API (every account in the pool)."""
     result = run(client.validate_cookies())
     if "accounts" in result:
-        # Pool multi-cuenta
-        click.echo(f"\n🔐 Pool: {result['alive']}/{result['total']} cuentas vivas")
+        # Multi-account pool
+        click.echo(f"\n🔐 Pool: {result['alive']}/{result['total']} accounts alive")
         for acc in result["accounts"]:
             if acc.get("valid"):
-                click.echo(f"  ✅ cuenta #{acc['account']}: @{acc.get('username')}")
+                click.echo(f"  ✅ account #{acc['account']}: @{acc.get('username')}")
             else:
-                click.echo(f"  ❌ cuenta #{acc['account']}: {acc.get('error')}")
+                click.echo(f"  ❌ account #{acc['account']}: {acc.get('error')}")
         if result["alive"] == 0:
             sys.exit(1)
     elif result.get("valid"):
-        click.echo(f"✅ Cookies válidas. @{result.get('username')} ({result.get('user_id')})")
+        click.echo(f"✅ Cookies valid. @{result.get('username')} ({result.get('user_id')})")
     else:
-        click.echo(f"❌ Cookies inválidas: {result.get('error')}", err=True)
+        click.echo(f"❌ Invalid cookies: {result.get('error')}", err=True)
         sys.exit(1)
 
 @cli.command()
@@ -70,9 +70,9 @@ def pipeline(client, pipeline_file, execute, output, cookies, cookies_file, from
 # ─── GraphQL endpoints ────────────────────────────────────────────────────────
 
 @cli.command("gql-status")
-@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+@click.option("--output", "-o", default=None, help="Output JSON file")
 def gql_status(output):
-    """Muestra el estado del cache de GraphQL query IDs."""
+    """Show the state of the GraphQL query ID cache."""
     from ..client import _DEFAULT_GRAPHQL_ENDPOINTS, GRAPHQL_ENDPOINTS
     from ..gql_refresh import cache_status
 
@@ -101,29 +101,29 @@ def gql_status(output):
         click.echo(f"  Update: {status.get('updated_at')}")
         click.echo(f"  Source: {status.get('source')}")
     else:
-        click.echo(f"  Cache:  (sin archivo) {status['path']}")
-        click.echo("  Usando solo defaults embebidos")
+        click.echo(f"  Cache:  (no file) {status['path']}")
+        click.echo("  Using built-in defaults only")
     click.echo(f"  Endpoints cargados: {len(GRAPHQL_ENDPOINTS)}")
     click.echo(f"{'─'*55}\n")
 
 
 @cli.command("gql-refresh")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión (mejora el crawl logueado)")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies (enables the richer logged-in crawl)")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
+@click.option("--output", "-o", default=None, help="Output JSON file")
 def gql_refresh_cmd(cookies, cookies_file, output):
     """
-    Actualiza los GraphQL query IDs.
+    Refresh the GraphQL query IDs.
 
-    Con cookies se prioriza el bundle logueado de X; sin ellas se intenta
-    anónimo y se cae a twikit como fallback.
+    With cookies, X's logged-in bundle is preferred; without them the
+    anonymous bundle is tried, falling back to twikit.
     """
     from ..client import refresh_graphql_endpoints
 
     cookie_list = _load_cookies_list(cookies, cookies_file)
     cookie = cookie_list[0] if cookie_list else None
     if cookie:
-        click.echo("🔐 Usando cookies para crawl logueado (sin imprimir el token)")
+        click.echo("🔐 Using cookies for the logged-in crawl (token not printed)")
     merged = run(refresh_graphql_endpoints(force=True, cookie=cookie))
     changed = {
         name: ep.get("queryId")
@@ -133,19 +133,19 @@ def gql_refresh_cmd(cookies, cookies_file, output):
     if output:
         print_json({"count": len(changed), "endpoints": changed}, output)
         return
-    click.echo(f"\n✅ GraphQL endpoints actualizados ({len(changed)} con queryId)")
+    click.echo(f"\n✅ GraphQL endpoints refreshed ({len(changed)} with a queryId)")
     for name, qid in list(changed.items())[:8]:
         click.echo(f"  {name}: {qid}")
     if len(changed) > 8:
-        click.echo(f"  … y {len(changed) - 8} más")
+        click.echo(f"  … and {len(changed) - 8} more")
     click.echo("")
 
 
 @cli.command()
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
-@click.option("--json", "as_json", is_flag=True, help="Imprimir JSON en stdout")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
+@click.option("--output", "-o", default=None, help="Output JSON file")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON to stdout")
 def doctor(cookies, cookies_file, output, as_json):
     """Check local setup: cookies, GraphQL cache, write caps, DB."""
     from ..doctor import run_doctor
@@ -201,7 +201,7 @@ def drafts_list(show_all, output):
 
 @drafts.command("approve")
 @click.argument("draft_id")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None)
 @click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
 def drafts_approve(draft_id, cookies, cookies_file, from_browser):

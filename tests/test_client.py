@@ -1,4 +1,4 @@
-"""Tests para el cliente HTTP de xactions-py."""
+"""Tests for the xactions-py HTTP client."""
 
 import asyncio
 
@@ -27,7 +27,7 @@ async def test_graphql_success(client):
         return_value=httpx.Response(200, json={"data": {"user": {"result": {"rest_id": "42"}}}})
     )
 
-    # Sobrescribimos endpoint para el test
+    # Override the endpoint for the test
     from xactions.client import GRAPHQL_ENDPOINTS
     old = GRAPHQL_ENDPOINTS["UserByScreenName"].copy()
     GRAPHQL_ENDPOINTS["UserByScreenName"]["queryId"] = "123"
@@ -244,7 +244,7 @@ async def test_mutation_not_retried_on_network_error():
     finally:
         GRAPHQL_ENDPOINTS["FavoriteTweet"].update(old)
 
-    # Las mutations no se reintentan para evitar acciones duplicadas.
+    # Mutations are not retried, to avoid duplicate actions.
     assert route.call_count == 1
 
 
@@ -272,8 +272,8 @@ async def test_csrf_token_updated_from_response(client):
 
 async def test_close_inside_running_loop_does_not_crash():
     client = TwitterClient(cookies="auth_token=a; ct0=b")
-    client.close()  # antes esto lanzaba RuntimeError desde un loop corriendo
-    await asyncio.sleep(0.01)  # deja correr la tarea de cierre programada
+    client.close()  # this used to raise RuntimeError from a running loop
+    await asyncio.sleep(0.01)  # let the scheduled close task run
     assert client._closed is True
 
 

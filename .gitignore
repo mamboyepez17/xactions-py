@@ -1,4 +1,4 @@
-# Credenciales — NUNCA subir
+# Credentials — never commit
 .env
 *.env
 cookies.txt

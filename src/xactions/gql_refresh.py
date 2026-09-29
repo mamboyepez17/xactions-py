@@ -1,14 +1,14 @@
 """
 XActions-PY — GraphQL query ID refresh.
 
-X rota los queryId al desplegar bundles JS. Este módulo:
-  1. Parsea el HTML de x.com (responsive-web y x-web) y localiza los bundles.
-  2. Extrae pares queryId/operationName (formato clásico y Relay `id`/`name`).
-  3. Fallback remoto: parsea el gql.py de twikit (misma fuente que usábamos a mano).
-  4. Cachea el resultado en ~/.xactions/gql_endpoints.json.
-  5. Mezcla los IDs nuevos sobre los defaults (conserva method/REST).
+X rotates queryIds whenever it deploys new JS bundles. This module:
+  1. Parses x.com's HTML (responsive-web and x-web) and finds the bundles.
+  2. Extracts queryId/operationName pairs (classic format and Relay `id`/`name`).
+  3. Remote fallback: parses twikit's gql.py (the source we used to copy by hand).
+  4. Caches the result in ~/.xactions/gql_endpoints.json.
+  5. Merges the new IDs over the defaults (keeping method/REST entries).
 
-Todo offline-friendly: los parsers se testean con fixtures sin red.
+Offline-friendly: the parsers are tested with fixtures, no network.
 """
 
 from __future__ import annotations
@@ -63,11 +63,11 @@ _TIKWIT_URL_RE = re.compile(
     r"""url\(\s*[\"'](?P<queryId>[A-Za-z0-9_-]{10,})/(?P<operationName>[A-Za-z0-9_]+)[\"']\s*\)"""
 )
 
-# Bundles del cliente web clásico
+# Classic web client bundles
 _BUNDLE_RE = re.compile(
     r"""https://abs\.twimg\.com/responsive-web/client-web(?:-legacy)?/[A-Za-z0-9._-]+\.js"""
 )
-# Nuevo x-web entry
+# New x-web entry
 _XWEB_ENTRY_RE = re.compile(
     r"""https://abs\.twimg\.com/x-web/[^\"']+\.js"""
 )
@@ -80,9 +80,9 @@ _ASSET_REL_RE = re.compile(r"""["'](\./assets/[^"']+\.js)["']""")
 
 def extract_operations(js_text: str) -> dict[str, dict[str, str]]:
     """
-    Extrae {operationName: {"queryId": ..., "operationName": ...}} de un bundle JS.
-    Soporta formato clásico y Relay. Si un operation aparece varias veces,
-    se queda con la última (más reciente en el bundle).
+    Extract {operationName: {"queryId": ..., "operationName": ...}} from a JS bundle.
+    Supports the classic and Relay formats. If an operation appears several
+    times, the last one (most recent in the bundle) wins.
     """
     found: dict[str, dict[str, str]] = {}
     for patterns in (_PAIR_RES, _RELAY_RES):
@@ -96,7 +96,7 @@ def extract_operations(js_text: str) -> dict[str, dict[str, str]]:
 
 
 def extract_operations_from_twikit(source: str) -> dict[str, dict[str, str]]:
-    """Parsea gql.py de twikit: url('queryId/OperationName')."""
+    """Parse twikit's gql.py: url('queryId/OperationName')."""
     found: dict[str, dict[str, str]] = {}
     for m in _TIKWIT_URL_RE.finditer(source):
         op = m.group("operationName")
@@ -106,7 +106,7 @@ def extract_operations_from_twikit(source: str) -> dict[str, dict[str, str]]:
 
 
 def load_cache(path: Path | str | None = None) -> dict[str, Any] | None:
-    """Lee el cache en disco. Devuelve None si no existe o es inválido."""
+    """Read the on-disk cache. Returns None if missing or invalid."""
     p = Path(path) if path else DEFAULT_CACHE_PATH
     if not p.exists():
         return None
@@ -125,7 +125,7 @@ def save_cache(
     path: Path | str | None = None,
     source: str = "bundle",
 ) -> Path:
-    """Persiste endpoints en disco. Devuelve la ruta escrita."""
+    """Persist endpoints to disk. Returns the path written."""
     p = Path(path) if path else DEFAULT_CACHE_PATH
     p.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -134,7 +134,7 @@ def save_cache(
         "endpoints": endpoints,
     }
     p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    _log.debug("Cache GraphQL guardado en %s (%d endpoints)", p, len(endpoints))
+    _log.debug("GraphQL cache saved to %s (%d endpoints)", p, len(endpoints))
     return p
 
 
@@ -143,13 +143,13 @@ def merge_endpoints(
     discovered: dict[str, dict[str, str]],
 ) -> dict[str, dict[str, Any]]:
     """
-    Actualiza los queryId de `base` con los de `discovered`.
-    Conserva method/REST (queryId None) y solo toca operaciones ya conocidas
-    o que aparezcan en discovered con queryId válido.
+    Update the queryIds in `base` with those in `discovered`.
+    Keeps method/REST entries (queryId None) and only touches operations that
+    are already known or appear in `discovered` with a valid queryId.
     """
     merged: dict[str, dict[str, Any]] = {k: dict(v) for k, v in base.items()}
 
-    # Mapear por operationName real (puede diferir del key de GRAPHQL_ENDPOINTS,
+    # Map by the real operationName (it can differ from the GRAPHQL_ENDPOINTS key,
     # ej. UserLikes -> operationName "Likes")
     by_op: dict[str, str] = {}
     for key, ep in merged.items():
@@ -167,19 +167,19 @@ def merge_endpoints(
             merged[key]["queryId"] = info["queryId"]
             merged[key]["operationName"] = info["operationName"]
         else:
-            # Operación nueva descubierta — se añade sin method especial
+            # Newly discovered operation — added with no special method
             merged[key] = {
                 "queryId": info["queryId"],
                 "operationName": info["operationName"],
             }
             updated += 1
 
-    _log.info("GraphQL merge: %d queryIds actualizados/añadidos", updated)
+    _log.info("GraphQL merge: %d queryIds updated/added", updated)
     return merged
 
 
 def _bundle_urls_from_html(html: str) -> list[str]:
-    """URLs de JS candidatos desde el HTML de x.com (prioriza main*/entry)."""
+    """Candidate JS URLs from x.com's HTML (main*/entry first)."""
     urls: list[str] = []
     for pattern in (_BUNDLE_RE, _XWEB_ENTRY_RE):
         for m in pattern.finditer(html):
@@ -190,14 +190,14 @@ def _bundle_urls_from_html(html: str) -> list[str]:
             src = "https:" + src
         if src.startswith("https://") and src.endswith(".js"):
             urls.append(src)
-    # únicos preservando orden
+    # dedupe, preserving order
     seen: set[str] = set()
     ordered: list[str] = []
     for u in urls:
         if u not in seen:
             seen.add(u)
             ordered.append(u)
-    # preferir entry logueado, luego main/entry, luego el resto
+    # prefer the logged-in entry, then main/entry, then the rest
     def _prio(u: str) -> tuple[int, str]:
         name = u.rsplit("/", 1)[-1]
         if "logged-in" in name:
@@ -211,7 +211,7 @@ def _bundle_urls_from_html(html: str) -> list[str]:
 
 
 def build_web_headers(cookie: str | None = None, user_agent: str | None = None) -> dict[str, str]:
-    """Headers para descargar HTML/bundles de x.com. Con cookie → sesión logueada."""
+    """Headers to download x.com HTML/bundles. With a cookie → logged-in session."""
     hdrs = {
         "User-Agent": user_agent
         or (
@@ -236,9 +236,9 @@ async def discover_from_bundles(
     min_ops: int = 3,
 ) -> dict[str, dict[str, str]]:
     """
-    Descarga HTML de x.com y parsea los bundles JS buscando queryIds.
-    Sigue imports relativos de x-web (./assets/*.js).
-    Con Cookie en headers, X sirve el entry-client-logged-in (más operaciones).
+    Download x.com's HTML and parse its JS bundles for queryIds.
+    Follows x-web's relative imports (./assets/*.js).
+    With a Cookie header, X serves entry-client-logged-in (more operations).
     """
     hdrs = headers or build_web_headers()
     resp = await http.get("https://x.com", headers=hdrs, follow_redirects=True)
@@ -260,7 +260,7 @@ async def discover_from_bundles(
             js = await http.get(url, headers=hdrs, follow_redirects=True)
             js.raise_for_status()
         except httpx.HTTPError as e:
-            _log.debug("No se pudo bajar %s: %s", url, e)
+            _log.debug("Could not download %s: %s", url, e)
             continue
         downloaded += 1
         ops = extract_operations(js.text)
@@ -284,14 +284,14 @@ async def discover_from_twikit(
     http: httpx.AsyncClient,
     headers: dict[str, str] | None = None,
 ) -> dict[str, dict[str, str]]:
-    """Descarga gql.py de twikit y extrae los queryId actuales."""
+    """Download twikit's gql.py and extract the current queryIds."""
     hdrs = headers or {"User-Agent": "xactions-py/1.5", "Accept": "text/plain"}
     resp = await http.get(TWIKIT_GQL_URL, headers=hdrs, follow_redirects=True)
     resp.raise_for_status()
     return extract_operations_from_twikit(resp.text)
 
 
-# Umbral: con menos de esto preferimos otra fuente
+# Threshold: with fewer ops than this, try another source
 _MIN_USEFUL_OPS = 5
 _CRITICAL_OPS = ("UserByScreenName", "UserTweets", "SearchTimeline", "CreateTweet")
 
@@ -311,14 +311,14 @@ async def refresh_endpoints(
     cookie: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """
-    Descubre queryIds nuevos y devuelve los endpoints mezclados.
+    Discover new queryIds and return the merged endpoints.
 
-    Cadena multi-fuente (la primera “buena” gana):
-      1. Bundle x.com **logueado** (si hay cookie)
-      2. Bundle x.com anónimo
+    Multi-source chain (the first “good” one wins):
+      1. **Logged-in** x.com bundle (if there is a cookie)
+      2. Anonymous x.com bundle
       3. twikit gql.py (fallback comunitario)
 
-    Si nada funciona, devuelve `base` sin tocar.
+    If nothing works, returns `base` untouched.
     """
     owns_client = http is None
     if http is None:
@@ -329,18 +329,18 @@ async def refresh_endpoints(
         auth_headers = headers or build_web_headers(cookie)
         anon_headers = headers if cookie is None else build_web_headers()
 
-        # 1) Bundle autenticado
+        # 1) Authenticated bundle
         if cookie or (headers and headers.get("Cookie")):
             try:
                 auth_ops = await discover_from_bundles(http, headers=auth_headers)
                 if auth_ops:
                     discovered = auth_ops
                     source = "bundle-auth"
-                    _log.info("Bundle logueado: %d operaciones", len(auth_ops))
+                    _log.info("Logged-in bundle: %d operations", len(auth_ops))
             except (httpx.HTTPError, OSError, ValueError) as e:
-                _log.warning("Bundle logueado no disponible: %s", e)
+                _log.warning("Logged-in bundle unavailable: %s", e)
 
-        # 2) Bundle anónimo (si aún no tenemos algo útil)
+        # 2) Anonymous bundle (if we still have nothing useful)
         if not _is_useful(discovered):
             try:
                 anon_ops = await discover_from_bundles(http, headers=anon_headers)
@@ -348,21 +348,21 @@ async def refresh_endpoints(
                     discovered = anon_ops
                     source = "bundle"
             except (httpx.HTTPError, OSError, ValueError) as e:
-                _log.warning("Bundle anónimo no disponible: %s", e)
+                _log.warning("Anonymous bundle unavailable: %s", e)
 
         # 3) twikit
         if not _is_useful(discovered):
             try:
                 remote = await discover_from_twikit(http)
                 if len(remote) > len(discovered):
-                    _log.info("Fallback twikit: %d operaciones", len(remote))
+                    _log.info("twikit fallback: %d operations", len(remote))
                     discovered = remote
                     source = "twikit"
             except (httpx.HTTPError, OSError, ValueError) as e:
-                _log.warning("Fallback twikit no disponible: %s", e)
+                _log.warning("twikit fallback unavailable: %s", e)
 
         if not discovered:
-            _log.warning("Refresh GraphQL: no se extrajeron queryIds (ninguna fuente)")
+            _log.warning("GraphQL refresh: no queryIds extracted (no source worked)")
             return {k: dict(v) for k, v in base.items()}
 
         merged = merge_endpoints(base, discovered)
@@ -370,7 +370,7 @@ async def refresh_endpoints(
             try:
                 save_cache(merged, path=cache_path, source=source)
             except OSError as e:
-                _log.warning("No se pudo guardar cache GraphQL: %s", e)
+                _log.warning("Could not save the GraphQL cache: %s", e)
         return merged
     finally:
         if owns_client:
@@ -381,7 +381,7 @@ def endpoints_with_cache(
     base: dict[str, dict[str, Any]],
     cache_path: Path | str | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Devuelve base mezclada con el cache en disco (si existe)."""
+    """Return base merged with the on-disk cache (if any)."""
     cached = load_cache(cache_path)
     if not cached:
         return {k: dict(v) for k, v in base.items()}
@@ -389,7 +389,7 @@ def endpoints_with_cache(
 
 
 def cache_status(cache_path: Path | str | None = None) -> dict[str, Any]:
-    """Resumen del cache para CLI `gql-status`."""
+    """Cache summary for the `gql-status` CLI."""
     p = Path(cache_path) if cache_path else DEFAULT_CACHE_PATH
     cached = load_cache(p)
     if not cached:

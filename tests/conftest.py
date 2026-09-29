@@ -1,4 +1,4 @@
-"""Config común de tests: sin refresh GraphQL en red real."""
+"""Shared test config: no real-network GraphQL refresh."""
 
 import os
 

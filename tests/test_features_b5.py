@@ -1,4 +1,4 @@
-"""Tests de features B5: query builder, thread, compare."""
+"""Tests for B5 features: query builder, thread, compare."""
 
 import pytest
 import respx

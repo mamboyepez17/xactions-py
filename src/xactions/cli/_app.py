@@ -11,5 +11,5 @@ from ._common import __version__
 @click.group()
 @click.version_option(__version__, prog_name="xactions-py")
 def cli():
-    """⚡ XActions-PY — Twitter automation sin npm."""
+    """⚡ XActions-PY — X/Twitter automation without npm."""
     pass

@@ -1,14 +1,14 @@
 """
 XActions-PY — Twitter HTTP Client
-Replica del TwitterHttpClient de XActions pero en Python puro.
-Sin npm, sin Puppeteer. Solo httpx + las GraphQL internas de Twitter.
+Port of XActions' TwitterHttpClient to pure Python.
+No npm, no Puppeteer: just httpx + X's internal GraphQL API.
 
 v1.2.0:
-  - Cliente HTTP persistente (connection pooling / keep-alive).
-  - Reintentos con backoff exponencial para errores de red y rate limits.
-  - Logging estructurado.
-  - Context manager async para cerrar conexiones de forma segura.
-  - Helpers REST (GET/POST) para validación de sesión y endpoints legacy.
+  - Persistent HTTP client (connection pooling / keep-alive).
+  - Retries with exponential backoff for network errors and rate limits.
+  - Structured logging.
+  - Async context manager to close connections safely.
+  - REST helpers (GET/POST) for session validation and legacy endpoints.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import httpx
 from .gql_refresh import endpoints_with_cache, refresh_endpoints
 from .transaction_id import generate_transaction_id
 
-# ─── Bearer Token público (embebido en el JS bundle de Twitter) ───────────────
+# ─── Public bearer token (embedded in X's JS bundle) ─────────────────────────
 BEARER_TOKEN = (
     "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
     "%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
@@ -46,7 +46,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
 ]
 
-# ─── GraphQL endpoints (defaults; se mezclan con cache ~/.xactions) ───────────
+# ─── GraphQL endpoints (defaults; merged with the ~/.xactions cache) ──────────
 _DEFAULT_GRAPHQL_ENDPOINTS: dict[str, dict[str, Any]] = {
     "UserByScreenName": {"queryId": "NimuplG1OB7Fd2btCLdBOw", "operationName": "UserByScreenName"},
     "UserByRestId": {"queryId": "tD8zKvQzwY3kdx5yz6YmOw", "operationName": "UserByRestId"},
@@ -76,13 +76,13 @@ _DEFAULT_GRAPHQL_ENDPOINTS: dict[str, dict[str, Any]] = {
     "UnfollowUser": {"queryId": None, "operationName": None},  # REST endpoint
 }
 
-# Store vivo: defaults + cache en disco. Se actualiza con refresh_graphql_endpoints().
+# Live store: defaults + on-disk cache. Updated by refresh_graphql_endpoints().
 GRAPHQL_ENDPOINTS: dict[str, dict[str, Any]] = endpoints_with_cache(_DEFAULT_GRAPHQL_ENDPOINTS)
 
-# Refresh global (una sola vez por proceso si varios clientes lo piden)
+# Global refresh (once per process even if several clients ask for it)
 _gql_refresh_lock: asyncio.Lock | None = None
 _gql_refreshed_this_process = False
-# Tests/CI pueden desactivar el refresh en red: XACTIONS_NO_GQL_REFRESH=1
+# Tests/CI can disable the network refresh: XACTIONS_NO_GQL_REFRESH=1
 _NO_GQL_REFRESH = os.getenv("XACTIONS_NO_GQL_REFRESH", "").strip() in {"1", "true", "yes"}
 
 DEFAULT_FEATURES = {
@@ -114,7 +114,7 @@ _log = logging.getLogger(__name__)
 
 
 def _is_stale_query_error(message: str) -> bool:
-    """Detecta errores típicos de queryId roto/obsoleto."""
+    """Detect the typical errors of a broken/stale queryId."""
     msg = (message or "").lower()
     needles = (
         "query does not exist",
@@ -134,25 +134,25 @@ async def refresh_graphql_endpoints(
     cookie: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """
-    Refresca GRAPHQL_ENDPOINTS (una vez por proceso salvo force=True).
-    Si se pasa `cookie` (auth_token/ct0), se prioriza el bundle logueado de X
-    y twikit queda solo como fallback.
+    Refresh GRAPHQL_ENDPOINTS (once per process unless force=True).
+    If `cookie` (auth_token/ct0) is given, X's logged-in bundle is preferred
+    and twikit is only a fallback.
     """
     global _gql_refreshed_this_process, _gql_refresh_lock
     if _NO_GQL_REFRESH:
-        _log.debug("Refresh GraphQL desactivado (XACTIONS_NO_GQL_REFRESH)")
+        _log.debug("GraphQL refresh disabled (XACTIONS_NO_GQL_REFRESH)")
         return GRAPHQL_ENDPOINTS
     if _gql_refresh_lock is None:
         _gql_refresh_lock = asyncio.Lock()
     async with _gql_refresh_lock:
         if _gql_refreshed_this_process and not force:
             return GRAPHQL_ENDPOINTS
-        _log.info("Refrescando GraphQL query IDs (auth=%s)…", bool(cookie))
+        _log.info("Refreshing GraphQL query IDs (auth=%s)…", bool(cookie))
         try:
             merged = await refresh_endpoints(GRAPHQL_ENDPOINTS, cookie=cookie)
         except (httpx.HTTPError, OSError, ValueError) as e:
-            _log.warning("Refresh GraphQL falló: %s", e)
-            _gql_refreshed_this_process = True  # no martillear la red
+            _log.warning("GraphQL refresh failed: %s", e)
+            _gql_refreshed_this_process = True  # don't hammer the network
             return GRAPHQL_ENDPOINTS
         GRAPHQL_ENDPOINTS.clear()
         GRAPHQL_ENDPOINTS.update(merged)
@@ -160,30 +160,30 @@ async def refresh_graphql_endpoints(
         return GRAPHQL_ENDPOINTS
 
 
-# ─── Excepciones ───────────────────────────────────────────────────────────────
+# ─── Exceptions ─────────────────────────────────────────────────────────────────
 
 class TwitterError(Exception):
-    """Base de errores del cliente."""
+    """Base class for client errors."""
     pass
 
 
 class RateLimitError(TwitterError):
-    """HTTP 429 o código 88 de la API."""
+    """HTTP 429 or API error code 88."""
     pass
 
 
 class AuthError(TwitterError):
-    """HTTP 401/403 o código 32 de la API."""
+    """HTTP 401 or API error code 32."""
     pass
 
 
 class NotFoundError(TwitterError):
-    """HTTP 404 o código 34 de la API."""
+    """HTTP 404 or API error code 34."""
     pass
 
 
 class ForbiddenError(TwitterError):
-    """HTTP 403 — acceso denegado a un recurso."""
+    """HTTP 403 — access to a resource denied."""
     pass
 
 
@@ -218,14 +218,14 @@ class XClient(Protocol):
     async def aclose(self) -> None: ...
 
 
-# ─── Cliente ────────────────────────────────────────────────────────────────────
+# ─── Client ─────────────────────────────────────────────────────────────────────
 
 class TwitterClient:
     """
-    Cliente HTTP asíncrono para la GraphQL interna de Twitter/X.
-    Equivalente directo del TwitterHttpClient de XActions en Python.
+    Async HTTP client for X's internal GraphQL API.
+    Direct Python equivalent of XActions' TwitterHttpClient.
 
-    Uso:
+    Usage:
         async with TwitterClient(cookies=...) as client:
             profile = await scrape_profile(client, "elonmusk")
     """
@@ -250,14 +250,14 @@ class TwitterClient:
         self._closed = False
         self._last_rate_limit_reset: int | None = None
         self._client_uuid = str(uuid.uuid4())
-        # Seguimiento proactivo de rate limits por path (x-rate-limit-*)
+        # Proactive per-path rate-limit tracking (x-rate-limit-*)
         self._max_rate_limit_wait = max(0.0, max_rate_limit_wait)
         self._rate_limits: dict[str, dict[str, Any]] = {}
 
         if cookies:
             self._parse_cookies(cookies)
 
-    # ─── Ciclo de vida ─────────────────────────────────────────────────────────
+    # ─── Lifecycle ────────────────────────────────────────────────────────────
 
     async def __aenter__(self) -> TwitterClient:
         return self
@@ -266,7 +266,7 @@ class TwitterClient:
         await self.aclose()
 
     def __del__(self):
-        # Limpieza best-effort si el usuario olvidó cerrar.
+        # Best-effort cleanup if the caller forgot to close.
         if self._client is not None and not self._closed:
             try:
                 asyncio.get_running_loop().create_task(self.aclose())
@@ -274,40 +274,40 @@ class TwitterClient:
                 pass
 
     async def aclose(self) -> None:
-        """Cierra el cliente HTTP y libera conexiones."""
+        """Close the HTTP client and release connections."""
         if self._client is not None:
             await self._client.aclose()
             self._client = None
         self._closed = True
-        _log.debug("TwitterClient cerrado")
+        _log.debug("TwitterClient closed")
 
     def close(self) -> None:
-        """Cierre síncrono (útil para wrappers sync)."""
+        """Synchronous close (for sync wrappers)."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            # No hay loop corriendo; usamos un loop nuevo.
+            # No running loop: use a fresh one.
             asyncio.run(self.aclose())
         else:
-            # Hay un loop corriendo: no se puede bloquear; programamos el cierre.
+            # A loop is running: we can't block, so schedule the close.
             loop.create_task(self.aclose())
 
     @property
     def _http(self) -> httpx.AsyncClient:
-        """Devuelve el cliente HTTP persistente, creándolo si es necesario."""
+        """Return the persistent HTTP client, creating it on first use."""
         if self._client is None:
             self._client = httpx.AsyncClient(
                 proxy=self._proxy,
                 timeout=self._timeout,
                 follow_redirects=True,
             )
-            _log.debug("TwitterClient: cliente HTTP creado")
+            _log.debug("TwitterClient: HTTP client created")
         return self._client
 
     # ─── Cookies / auth ──────────────────────────────────────────────────────────
 
     def _parse_cookies(self, cookie_str: str) -> None:
-        """Parsea string de cookies 'name=val; name2=val2' a dict."""
+        """Parse a 'name=val; name2=val2' cookie string into a dict."""
         self._cookies = {}
         for part in cookie_str.split(";"):
             part = part.strip()
@@ -365,7 +365,7 @@ class TwitterClient:
     # ─── Requests ────────────────────────────────────────────────────────────────
 
     def _rate_limit_key(self, url: str) -> str:
-        """Clave estable por recurso GraphQL/REST (sin query string ni queryId)."""
+        """Stable key per GraphQL/REST resource (no query string or queryId)."""
         path = url.split("?", 1)[0].rstrip("/")
         parts = [p for p in path.split("/") if p]
         if "graphql" in parts:
@@ -376,7 +376,7 @@ class TwitterClient:
         return "/".join(parts[-2:]) if len(parts) >= 2 else path
 
     def _record_rate_limit(self, url: str, response: httpx.Response) -> None:
-        """Guarda remaining/reset de la respuesta para throttle proactivo."""
+        """Store remaining/reset from the response for proactive throttling."""
         remaining = response.headers.get("x-rate-limit-remaining")
         reset = response.headers.get("x-rate-limit-reset")
         if remaining is None and reset is None:
@@ -394,13 +394,13 @@ class TwitterClient:
         self._rate_limits[key] = entry
 
     def rate_limit_status(self) -> dict[str, dict[str, Any]]:
-        """Snapshot de rate limits conocidos (para CLI/tests)."""
+        """Snapshot of known rate limits (for the CLI/tests)."""
         return {k: dict(v) for k, v in self._rate_limits.items()}
 
     async def _maybe_throttle(self, url: str) -> None:
         """
-        Si remaining=0 y el reset está en el futuro, espera ANTES del request
-        (evita pegar 429 cuando ya sabemos que se agotó).
+        If remaining=0 and the reset is in the future, wait BEFORE the request
+        (avoids hitting a 429 when we already know the budget is spent).
         """
         key = self._rate_limit_key(url)
         entry = self._rate_limits.get(key)
@@ -413,28 +413,28 @@ class TwitterClient:
         wait = float(reset) - time.time()
         if wait <= 0:
             return
-        # Cap configurable; si el reset está lejos, no bloqueamos el proceso entero
+        # Configurable cap: if the reset is far away, don't block the whole process
         wait = min(wait, self._max_rate_limit_wait)
         if wait <= 0:
             return
         _log.warning(
-            "Rate limit agotado en %s (remaining=0). Espera proactiva %.1fs",
+            "Rate limit exhausted for %s (remaining=0). Waiting %.1fs proactively",
             key,
             wait,
         )
         await asyncio.sleep(wait)
 
     def _retry_delay(self, attempt: int, response: httpx.Response | None = None) -> float:
-        """Calcula segundos de espera antes de reintentar."""
+        """Seconds to wait before retrying."""
         if response is not None and response.status_code == 429:
-            # Twitter usa x-rate-limit-reset (timestamp unix) o retry-after.
+            # X sends x-rate-limit-reset (unix timestamp) or retry-after.
             reset_ts = response.headers.get("x-rate-limit-reset")
             if reset_ts:
                 try:
                     wait = max(0.0, float(reset_ts) - time.time())
                     self._last_rate_limit_reset = int(reset_ts)
                     wait = min(wait, self._max_rate_limit_wait)
-                    _log.warning("Rate limit. Esperando %.1fs (reset=%s)", wait, reset_ts)
+                    _log.warning("Rate limited. Waiting %.1fs (reset=%s)", wait, reset_ts)
                     return wait
                 except (ValueError, TypeError):
                     pass
@@ -456,20 +456,20 @@ class TwitterClient:
         data_payload: dict[str, Any] | None = None,
         allow_replay: bool = True,
     ) -> httpx.Response:
-        """Request base con reintentos, rate-limit handling y logging."""
+        """Base request with retries, rate-limit handling and logging."""
         request_headers = self._build_headers(
             headers,
             method=method,
             path=url.split("?", 1)[0],
         )
         last_exception: Exception | None = None
-        # Las mutations no se reintentan: un timeout tras ser procesada
-        # por el servidor duplicaría la acción (like, tweet, unfollow...).
+        # Mutations are never retried: a timeout after the server processed
+        # one would duplicate the action (like, tweet, unfollow...).
         max_attempts = 1 if not allow_replay else self._max_retries + 1
 
         for attempt in range(max_attempts):
             try:
-                # Throttle proactivo si este endpoint ya se agotó
+                # Proactive throttle if this endpoint is already exhausted
                 await self._maybe_throttle(url)
 
                 if method.upper() == "GET":
@@ -483,14 +483,14 @@ class TwitterClient:
 
                 self._record_rate_limit(url, resp)
 
-                # Twitter rota el CSRF token en sesiones largas: si la respuesta
-                # trae un ct0 nuevo, lo adoptamos para las próximas peticiones.
+                # X rotates the CSRF token in long sessions: if the response
+                # carries a new ct0, adopt it for the following requests.
                 new_ct0 = resp.cookies.get("ct0")
                 if new_ct0 and new_ct0 != self._csrf_token:
                     self._csrf_token = new_ct0
                     self._cookies["ct0"] = new_ct0
                     self._cookie_str = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
-                    _log.debug("CSRF token actualizado desde la respuesta")
+                    _log.debug("CSRF token updated from the response")
 
                 if resp.status_code == 429:
                     if attempt < max_attempts - 1:
@@ -500,13 +500,13 @@ class TwitterClient:
                     raise RateLimitError(f"Rate limited. Reset: {self._last_rate_limit_reset}")
 
                 if resp.status_code == 401:
-                    raise AuthError(f"No autenticado o cookie expirada (HTTP {resp.status_code})")
+                    raise AuthError(f"Not authenticated or cookie expired (HTTP {resp.status_code})")
 
                 if resp.status_code == 403:
-                    raise ForbiddenError(f"Acceso denegado (HTTP {resp.status_code}): {resp.text[:200]}")
+                    raise ForbiddenError(f"Access denied (HTTP {resp.status_code}): {resp.text[:200]}")
 
                 if resp.status_code == 404:
-                    raise NotFoundError(f"Recurso no encontrado (HTTP {resp.status_code})")
+                    raise NotFoundError(f"Resource not found (HTTP {resp.status_code})")
 
                 if resp.status_code >= 400:
                     raise TwitterError(f"HTTP {resp.status_code}: {resp.text[:500]}")
@@ -517,12 +517,12 @@ class TwitterClient:
                 last_exception = e
                 if attempt < max_attempts - 1:
                     delay = 2.0 ** attempt
-                    _log.warning("Error de red en intento %d/%d: %s. Reintentando en %.1fs", attempt + 1, max_attempts, e, delay)
+                    _log.warning("Network error on attempt %d/%d: %s. Retrying in %.1fs", attempt + 1, max_attempts, e, delay)
                     await asyncio.sleep(delay)
                     continue
-                raise TwitterError(f"Error de red tras {max_attempts} intentos: {e}")
+                raise TwitterError(f"Network error after {max_attempts} attempts: {e}")
 
-        raise TwitterError(f"Max reintentos alcanzados: {last_exception}")
+        raise TwitterError(f"Max retries reached: {last_exception}")
 
     # ─── GraphQL ─────────────────────────────────────────────────────────────────
 
@@ -534,12 +534,12 @@ class TwitterClient:
         mutation: bool = False,
         _allow_refresh: bool = True,
     ) -> dict[str, Any]:
-        """Ejecuta una query o mutation GraphQL contra la API interna de Twitter."""
+        """Run a GraphQL query or mutation against X's internal API."""
         try:
             return await self._graphql_once(endpoint_name, variables, features, mutation)
         except (NotFoundError, TwitterError) as e:
-            # QueryId roto: 404 o error GraphQL de operación inexistente.
-            # Es seguro reintentar incluso en mutations: la operación no llegó a ejecutarse.
+            # Broken queryId: 404 or a GraphQL "operation does not exist" error.
+            # Safe to retry even for mutations: the operation never ran.
             if not _allow_refresh:
                 raise
             msg = str(e)
@@ -547,7 +547,7 @@ class TwitterClient:
             if not (is_404 or _is_stale_query_error(msg)):
                 raise
             _log.warning(
-                "Posible queryId obsoleto en %s (%s). Intentando refresh…",
+                "Possibly stale queryId for %s (%s). Trying a refresh…",
                 endpoint_name,
                 msg[:120],
             )
@@ -563,12 +563,12 @@ class TwitterClient:
     ) -> dict[str, Any]:
         ep = GRAPHQL_ENDPOINTS.get(endpoint_name)
         if not ep:
-            raise TwitterError(f"Endpoint GraphQL desconocido: {endpoint_name}")
+            raise TwitterError(f"Unknown GraphQL endpoint: {endpoint_name}")
         query_id = ep["queryId"]
         operation = ep["operationName"]
 
         if not query_id or not operation:
-            raise TwitterError(f"Endpoint {endpoint_name} no tiene queryId/operationName configurado")
+            raise TwitterError(f"Endpoint {endpoint_name} has no queryId/operationName configured")
 
         url = f"{GRAPHQL_BASE}/{query_id}/{operation}"
         features_payload = features if features is not None else DEFAULT_FEATURES
@@ -614,13 +614,13 @@ class TwitterClient:
     # ─── REST helpers ────────────────────────────────────────────────────────────
 
     async def rest_get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """GET a un endpoint REST (ej. verify_credentials)."""
+        """GET a REST endpoint."""
         url = f"{REST_BASE}{path}"
         resp = await self._request("GET", url, params=params)
         return resp.json()
 
     async def rest_post(self, path: str, data: dict[str, Any]) -> dict[str, Any]:
-        """POST a un endpoint REST (usado para follow/unfollow)."""
+        """POST to a REST endpoint (used for follow/unfollow)."""
         url = f"{REST_BASE}{path}"
         resp = await self._request(
             "POST",
@@ -637,12 +637,12 @@ class TwitterClient:
         extra_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Sube un archivo binario via multipart/form-data (media upload).
-        No usa _request porque multipart no puede reintentarse de forma segura
-        y requiere headers distintos (httpx pone el boundary solo).
+        Upload a binary file via multipart/form-data (media upload).
+        Bypasses _request: multipart cannot be retried safely and needs
+        different headers (httpx sets the boundary itself).
         """
         if self._closed:
-            raise TwitterError("El cliente está cerrado")
+            raise TwitterError("The client is closed")
         import os
 
         filename = os.path.basename(file_path)
@@ -656,26 +656,26 @@ class TwitterClient:
             )
 
         if resp.status_code == 401:
-            raise AuthError("No autenticado para subir media")
+            raise AuthError("Not authenticated to upload media")
         if resp.status_code == 403:
-            raise ForbiddenError(f"Acceso denegado al subir media: {resp.text[:200]}")
+            raise ForbiddenError(f"Access denied uploading media: {resp.text[:200]}")
         if resp.status_code == 429:
-            raise RateLimitError("Rate limited al subir media")
+            raise RateLimitError("Rate limited uploading media")
         if resp.status_code >= 400:
-            raise TwitterError(f"HTTP {resp.status_code} al subir media: {resp.text[:300]}")
+            raise TwitterError(f"HTTP {resp.status_code} uploading media: {resp.text[:300]}")
 
         return resp.json()
 
-    # ─── Validación de sesión ────────────────────────────────────────────────────
+    # ─── Session validation ──────────────────────────────────────────────────────
 
     async def validate_cookies(self) -> dict[str, Any]:
         """
-        Verifica que las cookies sean válidas con una query GraphQL autenticada
-        (HomeLatestTimeline). El REST verify_credentials de X ya no existe.
-        Devuelve {valid, username?, user_id?} o {valid: False, error}.
+        Check that the cookies are valid with an authenticated GraphQL query
+        (HomeLatestTimeline). X's REST verify_credentials no longer exists.
+        Returns {valid, username?, user_id?} or {valid: False, error}.
         """
         if not self.is_authenticated():
-            raise AuthError("Falta auth_token en las cookies")
+            raise AuthError("auth_token is missing from the cookies")
         try:
             data = await self.graphql(
                 "HomeLatestTimeline",
@@ -689,11 +689,11 @@ class TwitterClient:
         except (AuthError, ForbiddenError, NotFoundError) as e:
             return {"valid": False, "error": str(e)}
         except TwitterError as e:
-            # 404 de query roto no implica cookies malas; lo tratamos como inválido con detalle
+            # A broken-query 404 doesn't mean bad cookies; report invalid with the detail
             return {"valid": False, "error": str(e)}
 
         if not data or "data" not in data:
-            return {"valid": False, "error": "Respuesta GraphQL vacía o sin data"}
+            return {"valid": False, "error": "Empty GraphQL response or no data"}
 
         # The home timeline only shows *other* accounts' tweets, so the viewer
         # is identified from the twid cookie and resolved via UserByRestId.
@@ -729,12 +729,12 @@ class TwitterClient:
             "via": "HomeLatestTimeline",
         }
 
-    # ─── GraphQL query ID refresh (con cookies de esta sesión) ─────────────────
+    # ─── GraphQL query ID refresh (with this session's cookies) ───────────────
 
     async def refresh_gql_endpoints(self, force: bool = True) -> dict[str, dict[str, Any]]:
         """
-        Refresca los query IDs GraphQL usando las cookies de este cliente
-        (bundle logueado primero; twikit solo como fallback).
+        Refresh GraphQL query IDs using this client's cookies
+        (logged-in bundle first; twikit only as a fallback).
         """
         return await refresh_graphql_endpoints(
             force=force,

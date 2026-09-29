@@ -1,4 +1,4 @@
-"""Tests para el CLI (Click + respx)."""
+"""Tests for the CLI (Click + respx)."""
 
 import httpx
 import respx
@@ -53,9 +53,9 @@ def test_search_forbidden_error_message():
         cli, ["search", "blocked", "--limit", "5"], env={"TWITTER_COOKIES": "auth_token=a; ct0=b"}
     )
 
-    # Sin resultados y con bloqueo, el CLI debe fallar con un mensaje claro.
+    # No results and a block: the CLI must fail with a clear message.
     assert result.exit_code == 1
-    assert "Acceso denegado" in result.output
+    assert "Access denied" in result.output
 
 
 def test_version_option():

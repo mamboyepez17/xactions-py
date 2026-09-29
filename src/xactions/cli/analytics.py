@@ -29,12 +29,12 @@ from ._common import (
 @cli.command()
 @click.argument("username")
 @click.option("--limit", "-l", default=100, show_default=True, help="Tweets a analizar")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
+@click.option("--output", "-o", default=None, help="Output JSON file")
 @with_client
 def analyze(client, username, limit, output):
-    """Analiza el engagement de un usuario (promedios, top tweets, mejores horas)."""
+    """Analyze a user's engagement (averages, top tweets, best hours)."""
 
     async def _analyze():
         prof = await scrape_profile(client, username)
@@ -55,12 +55,12 @@ def analyze(client, username, limit, output):
 @cli.command()
 @click.argument("username")
 @click.option("--limit", "-l", default=50, show_default=True, help="Tweets a trackear")
-@click.option("--db", "db_path", default=None, help="Path de la base SQLite (default ~/.xactions/xactions.db)")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
+@click.option("--db", "db_path", default=None, help="SQLite database path (default ~/.xactions/xactions.db)")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
 @with_client
 def track(client, username, limit, db_path):
-    """Guarda un snapshot de métricas de un usuario en SQLite y muestra el delta."""
+    """Store a snapshot of a user's metrics in SQLite and show the delta."""
     db = TrackerDB(db_path)
 
     async def _collect():
@@ -76,24 +76,24 @@ def track(client, username, limit, db_path):
     db.save_profile_snapshot(username, prof)
     saved = db.save_tweet_snapshots(tw)
 
-    click.echo(f"\n📸 Snapshot guardado para @{username} ({saved} tweets)")
+    click.echo(f"\n📸 Snapshot saved for @{username} ({saved} tweets)")
     click.echo(f"  Followers: {prof.get('followers', 0):,}")
     if delta["followers_delta"] is not None:
         sign = "+" if delta["followers_delta"] >= 0 else ""
-        click.echo(f"  Δ followers: {sign}{delta['followers_delta']:,} (desde {delta.get('since')})")
+        click.echo(f"  Δ followers: {sign}{delta['followers_delta']:,} (since {delta.get('since')})")
         click.echo(f"  Δ tweets:    {'+' if delta['tweets_delta'] >= 0 else ''}{delta['tweets_delta']:,}")
     else:
-        click.echo("  (primer snapshot — corre el comando de nuevo para ver deltas)")
+        click.echo("  (first snapshot — run the command again to see deltas)")
     click.echo(f"  DB: {db.path}\n")
 
 
 @cli.command()
 @click.argument("username")
 @click.option("--limit", "-l", default=30, show_default=True, help="Snapshots a mostrar")
-@click.option("--db", "db_path", default=None, help="Path de la base SQLite")
-@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
+@click.option("--db", "db_path", default=None, help="SQLite database path")
+@click.option("--output", "-o", default=None, help="Output JSON file")
 def history(username, limit, db_path, output):
-    """Muestra el histórico de snapshots de un usuario trackeado."""
+    """Show the snapshot history of a tracked user."""
     try:
         db = TrackerDB(db_path)
         rows = db.get_profile_history(username, limit=limit)
@@ -103,13 +103,13 @@ def history(username, limit, db_path, output):
             return
 
         if not rows:
-            click.echo(f"⚠️  No hay snapshots de @{username}. Usa: xactions track {username}")
+            click.echo(f"⚠️  No snapshots for @{username}. Run: xactions track {username}")
             return
 
         click.echo(f"\n{'─'*60}")
-        click.echo(f"  📈 Histórico de @{username} ({len(rows)} snapshots)")
+        click.echo(f"  📈 History of @{username} ({len(rows)} snapshots)")
         click.echo(f"{'─'*60}")
-        click.echo(f"  {'Fecha':<22} {'Followers':>12} {'Following':>12} {'Tweets':>10}")
+        click.echo(f"  {'Date':<22} {'Followers':>12} {'Following':>12} {'Tweets':>10}")
         for r in reversed(rows):
             click.echo(
                 f"  {r['captured_at']:<22} {r['followers']:>12,} "
@@ -123,14 +123,14 @@ def history(username, limit, db_path, output):
 @cli.command()
 @click.argument("user_a")
 @click.argument("user_b")
-@click.option("--limit", "-l", default=50, show_default=True, help="Tweets a analizar por cuenta")
-@click.option("--output", "-o", default=None, help="Archivo JSON de salida")
-@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Cookies de sesión")
-@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Archivo con cookies")
-@click.option("--table", is_flag=True, help="Mostrar como tabla")
+@click.option("--limit", "-l", default=50, show_default=True, help="Tweets to analyze per account")
+@click.option("--output", "-o", default=None, help="Output JSON file")
+@click.option("--cookies", envvar=COOKIES_ENV, default="", help="Session cookies")
+@click.option("--cookies-file", type=click.Path(exists=True), default=None, help="Cookie file")
+@click.option("--table", is_flag=True, help="Show as a table")
 @with_client
 def compare(client, user_a, user_b, limit, output, table):
-    """Compara dos cuentas: followers, engagement rate y promedios."""
+    """Compare two accounts: followers, engagement rate and averages."""
 
     async def _collect():
         prof_a, tw_a, prof_b, tw_b = await asyncio.gather(
@@ -150,9 +150,9 @@ def compare(client, user_a, user_b, limit, output, table):
 
     a, b = report["a"], report["b"]
     click.echo(f"\n{'═'*60}")
-    click.echo(f"  Comparativa @{a['username']} vs @{b['username']}")
+    click.echo(f"  @{a['username']} vs @{b['username']}")
     click.echo(f"{'═'*60}")
-    click.echo(f"  {'Métrica':<28} {'@' + str(a['username']):>14} {'@' + str(b['username']):>14}")
+    click.echo(f"  {'Metric':<28} {'@' + str(a['username']):>14} {'@' + str(b['username']):>14}")
     click.echo(f"  {'-'*56}")
     rows = [
         ("Followers", a.get("followers"), b.get("followers")),
@@ -168,7 +168,7 @@ def compare(client, user_a, user_b, limit, output, table):
         fb = f"{vb:,}" if isinstance(vb, (int, float)) else "—"
         click.echo(f"  {label:<28} {fa:>14} {fb:>14}")
     winners = report.get("winner") or {}
-    click.echo(f"\n  Ganadores: followers={winners.get('followers')} · "
+    click.echo(f"\n  Winners: followers={winners.get('followers')} · "
                f"ER={winners.get('engagement_rate_followers')} · "
                f"likes={winners.get('avg_likes')}")
     click.echo(f"{'═'*60}\n")
