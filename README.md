@@ -280,7 +280,13 @@ src/xactions/
   gql_refresh.py      # query ID heal
   mcp_groups.py       # MCP tool filter
   mcp_server.py
-  cli.py              # `xactions` entry point
+  cli/                # `xactions` entry point
+    _common.py        #   client setup, output writers, tables
+    read.py           #   profile, tweets, search, timelines
+    analytics.py      #   analyze, track, compare, report, sentiment
+    write.py          #   post, like, follow, bulk-unfollow, engage
+    monitor.py        #   watch, download-media, unfollowers
+    system.py         #   validate, pipeline, gql-*, doctor, drafts
 tests/                # pytest + respx
 ```
 

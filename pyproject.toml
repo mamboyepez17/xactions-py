@@ -57,5 +57,5 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 # reconfigure de encoding Windows + load_dotenv antes de imports del paquete
-"src/xactions/cli.py" = ["E402"]
+"src/xactions/cli/__init__.py" = ["E402"]
 "src/xactions/mcp_server.py" = ["E402"]
