@@ -303,6 +303,18 @@ X rotates internal query IDs. v1.5+ mitigates this:
 
 ---
 
+## Releasing
+
+1. Bump `version` in `pyproject.toml` and move the CHANGELOG `Unreleased` notes under it.
+2. Tag and push: `git tag v1.9.0 && git push origin v1.9.0`.
+3. `.github/workflows/release.yml` runs the tests, builds, checks and publishes to PyPI.
+
+One-time setup: on PyPI, add a *Trusted Publisher* for this repo (workflow `release.yml`,
+environment `pypi`), and create the `pypi` environment under the repo's GitHub settings.
+No API token is stored anywhere.
+
+---
+
 ## Project layout
 
 ```

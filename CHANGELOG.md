@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Fixed
+- **`--table` crashed on every read command** (it iterated the result wrapper instead of the rows).
+- **CSV export crashed** when rows had different keys; it now writes the union of columns.
+- **Tests no longer write to the real `~/.xactions`** (they were charging your real daily write caps).
 - **Daily write caps now persist across runs.** The per-account key used Python's per-process salted `hash()`, so every CLI/MCP run started from zero. It is now a SHA-256 of the auth token, and `ClientPool` is keyed by the account in use.
 - **`bulk_unfollow` stops** on `WriteCapExceeded` / `AuthError` instead of sleeping through the rest of the list (result gains a `stopped` field).
 - **Non-followers no longer include real followers.** `scrape_non_followers` truncated the follower list to `limit`, so accounts with more followers than `limit` had real followers reported (and bulk-unfollowed). The follower list is now fetched in full, and an incomplete list (< 90% of the profile count) raises instead of returning unsafe results.
@@ -27,6 +30,13 @@
 - README shows the live CI badge instead of a hand-maintained test count.
 
 ### Added
+- **Scheduled tweets**: `xactions schedule add|list|cancel|run` (SQLite queue, atomic claim so overlapping runs never double-post, daily caps apply; `--at` ISO or `+30m/+2h/+1d`).
+- **X Lists**: `xactions lists tweets|members|create|add|remove`, library functions and MCP tools (`x_get_list_tweets`, `x_get_list_members`, `x_create_list`, `x_add_list_member`, `x_remove_list_member`); writes are capped and draft-gated.
+- **Video/GIF upload**: chunked INIT/APPEND/FINALIZE/STATUS upload; `post --media` accepts one video/GIF or up to 4 images.
+- **Signed webhooks**: `XACTIONS_WEBHOOK_SECRET` adds `X-Xactions-Timestamp` + `X-Xactions-Signature` (HMAC-SHA256); `notify.verify_signature()` for receivers.
+- **Follower-history chart** in `report --format html` (from `xactions track` snapshots), light/dark aware.
+- **`--csv` / `--ndjson`** on `history`, `compare`, `sentiment`, `unfollowers`, `schedule list` and `drafts list`.
+- **PyPI release workflow** (`.github/workflows/release.yml`): tag `vX.Y.Z` → test, build, `twine check`, publish via Trusted Publishing. Package metadata (classifiers, URLs, keywords).
 - Coverage report in CI with a 55% floor (`pytest-cov`).
 - `.pre-commit-config.yaml` (whitespace/YAML/TOML/private-key hooks + the project's ruff and mypy).
 - `mypy` in CI.
