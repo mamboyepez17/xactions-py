@@ -27,6 +27,20 @@ def approval_required() -> bool:
     return os.getenv(APPROVAL_ENV, "").strip().lower() in {"1", "true", "yes"}
 
 
+_last_created_at = 0.0
+
+
+def _creation_time() -> float:
+    """
+    Strictly increasing timestamp within a process, so drafts created back to
+    back keep their order even where time.time() is coarse (~15ms on Windows).
+    """
+    global _last_created_at
+    now = max(time.time(), _last_created_at + 1e-6)
+    _last_created_at = now
+    return now
+
+
 def _drafts_dir(path: Path | str | None = None) -> Path:
     return Path(path) if path else DEFAULT_DRAFTS_DIR
 
@@ -41,14 +55,15 @@ def create_draft(
     d = _drafts_dir(path)
     d.mkdir(parents=True, exist_ok=True)
     draft_id = uuid.uuid4().hex[:12]
+    created_at = _creation_time()
     draft = {
         "id": draft_id,
         "action": action,
         "params": params,
         "account": account,
         "status": "pending",
-        "created_at": time.time(),
-        "updated_at": time.time(),
+        "created_at": created_at,
+        "updated_at": created_at,
     }
     (d / f"{draft_id}.json").write_text(
         json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8"
