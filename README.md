@@ -158,6 +158,17 @@ xactions pipeline hot-ai.json --execute # allow like steps
 export XACTIONS_WEBHOOK_URL=https://ntfy.sh/your-topic
 ```
 
+**Signed webhooks.** Set `XACTIONS_WEBHOOK_SECRET` and every delivery carries
+`X-Xactions-Timestamp` and `X-Xactions-Signature: sha256=<hex>`, an HMAC-SHA256 of
+`"<timestamp>.<raw body>"`. Verify it on the receiver (rejects forged and replayed calls):
+
+```python
+from xactions.notify import verify_signature
+
+ok = verify_signature(secret, request_body_bytes,
+                      headers["X-Xactions-Timestamp"], headers["X-Xactions-Signature"])
+```
+
 ---
 
 ## Python API
