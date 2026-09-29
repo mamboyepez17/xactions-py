@@ -30,6 +30,9 @@ TOOL_PREFIX_GROUPS: list[tuple[str, str]] = [
     ("x_bookmark_", "write"),
     ("x_unbookmark_", "write"),
     ("x_bulk_", "write"),
+    ("x_create_list", "write"),
+    ("x_add_list_member", "write"),
+    ("x_remove_list_member", "write"),
     ("x_list_drafts", "drafts"),
     ("x_discard_draft", "drafts"),
 ]

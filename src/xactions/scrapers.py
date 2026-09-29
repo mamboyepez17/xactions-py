@@ -226,7 +226,7 @@ def _parse_tweet_list(instructions: list[dict[str, Any]]) -> tuple[list[dict[str
                 cursor = content.get("value") or content.get("itemContent", {}).get("value")
                 continue
 
-            # Tweet normal
+            # Plain tweet
             item_content = content.get("itemContent", {})
             if item_content.get("itemType") == "TimelineTweet":
                 tweet = parse_tweet(item_content)
@@ -234,7 +234,7 @@ def _parse_tweet_list(instructions: list[dict[str, Any]]) -> tuple[list[dict[str
                     tweets.append(tweet)
                 continue
 
-            # Thread: puede tener multiples tweets dentro
+            # Thread module: may hold several tweets
             if "TimelineTimelineModule" in str(content.get("itemType", "")):
                 for sub_item in content.get("items", []):
                     sub_content = sub_item.get("item", {}).get("itemContent", {})
@@ -691,6 +691,48 @@ async def get_bookmarks(
         cursor = new_cursor
 
     return all_tweets[:limit]
+
+
+# ─── Lists ────────────────────────────────────────────────────────────────────
+
+async def get_list_tweets(client: XClient, list_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    """Fetch the latest tweets of an X List."""
+    all_tweets: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while len(all_tweets) < limit:
+        variables: dict[str, Any] = {"listId": str(list_id), "count": min(PAGE_SIZE_TWEETS, limit - len(all_tweets))}
+        if cursor:
+            variables["cursor"] = cursor
+        data = await client.graphql("ListLatestTweetsTimeline", variables=variables)
+        instructions = _instructions_from_data(data, ["list", "tweets_timeline", "timeline"])
+        batch, new_cursor = _parse_tweet_list(instructions)
+        all_tweets.extend(batch)
+        if not new_cursor or new_cursor == cursor or not batch:
+            break
+        cursor = new_cursor
+    return all_tweets[:limit]
+
+
+async def get_list_members(client: XClient, list_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    """Fetch the members of an X List."""
+    all_users: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while len(all_users) < limit:
+        variables: dict[str, Any] = {
+            "listId": str(list_id),
+            "count": min(PAGE_SIZE_USERS, limit - len(all_users)),
+            "withSafetyModeUserFields": True,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+        data = await client.graphql("ListMembers", variables=variables)
+        instructions = _instructions_from_data(data, ["list", "members_timeline", "timeline"])
+        batch, new_cursor = _parse_user_list(instructions)
+        all_users.extend(batch)
+        if not new_cursor or new_cursor == cursor or not batch:
+            break
+        cursor = new_cursor
+    return all_users[:limit]
 
 
 # ─── Home timeline ────────────────────────────────────────────────────────────

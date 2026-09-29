@@ -408,6 +408,53 @@ async def unfollow_user(client: XClient, user_id: str) -> dict[str, Any]:
     return {"success": ok}
 
 
+# ─── Lists ────────────────────────────────────────────────────────────────────
+
+async def create_list(
+    client: XClient, name: str, description: str = "", private: bool = False
+) -> dict[str, Any]:
+    """Create an X List owned by the authenticated account."""
+    _require_auth(client)
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("List name cannot be empty")
+    _before_write(client, "list_create")
+    data = await client.graphql(
+        "CreateList",
+        variables={"isPrivate": private, "name": name, "description": description},
+        mutation=True,
+    )
+    lst = data.get("data", {}).get("list") or {}
+    list_id = lst.get("id_str") or lst.get("rest_id")
+    if list_id:
+        _after_write(client, "list_create")
+    return {"success": bool(list_id), "list_id": list_id, "name": lst.get("name", name)}
+
+
+async def _list_member_mutation(client: XClient, endpoint: str, op: str, list_id: str, user_id: str) -> dict[str, Any]:
+    _require_auth(client)
+    _before_write(client, op)
+    data = await client.graphql(
+        endpoint,
+        variables={"listId": str(list_id), "userId": str(user_id)},
+        mutation=True,
+    )
+    ok = bool(data.get("data", {}).get("list"))
+    if ok:
+        _after_write(client, op)
+    return {"success": ok}
+
+
+async def list_add_member(client: XClient, list_id: str, user_id: str) -> dict[str, Any]:
+    """Add a user (by user_id) to a List you own."""
+    return await _list_member_mutation(client, "ListAddMember", "list_add", list_id, user_id)
+
+
+async def list_remove_member(client: XClient, list_id: str, user_id: str) -> dict[str, Any]:
+    """Remove a user (by user_id) from a List you own."""
+    return await _list_member_mutation(client, "ListRemoveMember", "list_remove", list_id, user_id)
+
+
 # ─── Bulk unfollow ─────────────────────────────────────────────────────────────
 
 async def bulk_unfollow(

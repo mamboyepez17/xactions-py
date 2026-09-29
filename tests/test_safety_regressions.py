@@ -197,6 +197,9 @@ async def test_mcp_write_tools_draft_when_approval_required(mcp_server, monkeypa
         mcp_server.x_unfollow_user("jack"),
         mcp_server.x_bookmark_tweet("1"),
         mcp_server.x_unbookmark_tweet("1"),
+        mcp_server.x_create_list("news"),
+        mcp_server.x_add_list_member("5", "jack"),
+        mcp_server.x_remove_list_member("5", "jack"),
     ):
         out = await call
         assert "Approval required" in out

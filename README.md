@@ -114,6 +114,19 @@ xactions engage "keyword" --like --limit 5 --dry-run
 xactions engage "keyword" --like --limit 5 --execute   # daily caps apply
 ```
 
+### Lists
+
+```bash
+xactions lists tweets 1234567890 --limit 30 --table
+xactions lists members 1234567890 --csv members.csv
+xactions lists create "AI builders" --description "people shipping" --private
+xactions lists add 1234567890 @jack       # writes: daily caps + approval gate apply
+xactions lists remove 1234567890 @jack
+```
+
+MCP: `x_get_list_tweets`, `x_get_list_members` (read) and `x_create_list`,
+`x_add_list_member`, `x_remove_list_member` (write, draft-gated).
+
 ### Scheduled tweets
 
 ```bash
@@ -318,6 +331,7 @@ src/xactions/
     monitor.py        #   watch, download-media, unfollowers
     system.py         #   validate, pipeline, gql-*, doctor, drafts
     schedule.py       #   schedule add/list/cancel/run
+    lists.py          #   lists tweets/members/create/add/remove
 tests/                # pytest + respx
 ```
 

@@ -63,6 +63,12 @@ _DEFAULT_GRAPHQL_ENDPOINTS: dict[str, dict[str, Any]] = {
     "Bookmarks": {"queryId": "qToeLeMs43Q8cr7tRYXmaQ", "operationName": "Bookmarks"},
     "HomeTimeline": {"queryId": "-X_hcgQzmHGl29-UXxz4sw", "operationName": "HomeTimeline", "method": "POST"},
     "HomeLatestTimeline": {"queryId": "U0cdisy7QFIoTfu3-Okw0A", "operationName": "HomeLatestTimeline", "method": "POST"},
+    # Lists (IDs self-heal via the GraphQL refresh if X rotates them)
+    "ListLatestTweetsTimeline": {"queryId": "HjsWc-nwwHKYwHenbHm-tw", "operationName": "ListLatestTweetsTimeline"},
+    "ListMembers": {"queryId": "BQp2IEYkgxuSxqbTAr1e1g", "operationName": "ListMembers"},
+    "CreateList": {"queryId": "EYg7JZU3A1eJ-wr2eygPHQ", "operationName": "CreateList"},
+    "ListAddMember": {"queryId": "lLNsL7mW6gSEQG6rXP7TNw", "operationName": "ListAddMember"},
+    "ListRemoveMember": {"queryId": "cvDFkG5WjcXV0Qw5nfe1qQ", "operationName": "ListRemoveMember"},
     # Mutations
     "CreateTweet": {"queryId": "SiM_cAu83R0wnrpmKQQSEw", "operationName": "CreateTweet"},
     "FavoriteTweet": {"queryId": "lI07N6Otwv1PhnEgXILM7A", "operationName": "FavoriteTweet"},

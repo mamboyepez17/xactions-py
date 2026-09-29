@@ -32,10 +32,13 @@ except ImportError:  # pragma: no cover - compat mcp 1.x
 from .actions import (
     bulk_unfollow,
     create_bookmark,
+    create_list,
     delete_bookmark,
     delete_tweet,
     follow_user,
     like_tweet,
+    list_add_member,
+    list_remove_member,
     post_thread,
     post_tweet,
     retweet,
@@ -56,6 +59,8 @@ from .pool import ClientPool
 from .scrapers import (
     get_bookmarks,
     get_home_timeline,
+    get_list_members,
+    get_list_tweets,
     get_trends,
     get_tweet_favoriters,
     get_tweet_replies,
@@ -349,6 +354,26 @@ async def x_get_bookmarks(limit: int = 50) -> str:
 
 
 @mcp.tool()
+async def x_get_list_tweets(list_id: str, limit: int = 50) -> str:
+    """Fetch the latest tweets of an X List. list_id: numeric List ID."""
+    try:
+        tweets = await get_list_tweets(get_client(), list_id, limit=limit)
+        return json.dumps({"list_id": list_id, "count": len(tweets), "tweets": tweets}, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_get_list_members(list_id: str, limit: int = 100) -> str:
+    """Fetch the members of an X List. list_id: numeric List ID."""
+    try:
+        users = await get_list_members(get_client(), list_id, limit=limit)
+        return json.dumps({"list_id": list_id, "count": len(users), "members": users}, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
 async def x_get_home_timeline(limit: int = 50, latest: bool = False) -> str:
     """Fetch the authenticated user's home timeline. Requires auth."""
     try:
@@ -595,6 +620,45 @@ async def x_unbookmark_tweet(tweet_id: str) -> str:
         client = get_client()
         result = await delete_bookmark(client, tweet_id)
         return "✅ Bookmark removed." if result["success"] else "❌ Could not remove the bookmark."
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_create_list(name: str, description: str = "", private: bool = False) -> str:
+    """Create an X List. Requires authentication."""
+    try:
+        params = {"name": name, "description": description, "private": private}
+        if gated := _draft_if_required("list_create", params):
+            return gated
+        result = await create_list(get_client(), name, description, private)
+        return f"✅ List created: {result['name']} (id {result['list_id']})" if result["success"] else "❌ Could not create the list."
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_add_list_member(list_id: str, username: str) -> str:
+    """Add a user to a List you own. Requires authentication. username: handle without @"""
+    try:
+        if gated := _draft_if_required("list_add", {"list_id": list_id, "username": username}):
+            return gated
+        client = get_client()
+        result = await list_add_member(client, list_id, await get_user_id(client, username))
+        return f"✅ @{username} added to list {list_id}." if result["success"] else f"❌ Could not add @{username}."
+    except Exception as e:
+        return _fmt_error(e)
+
+
+@mcp.tool()
+async def x_remove_list_member(list_id: str, username: str) -> str:
+    """Remove a user from a List you own. Requires authentication. username: handle without @"""
+    try:
+        if gated := _draft_if_required("list_remove", {"list_id": list_id, "username": username}):
+            return gated
+        client = get_client()
+        result = await list_remove_member(client, list_id, await get_user_id(client, username))
+        return f"✅ @{username} removed from list {list_id}." if result["success"] else f"❌ Could not remove @{username}."
     except Exception as e:
         return _fmt_error(e)
 

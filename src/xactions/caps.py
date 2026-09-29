@@ -35,6 +35,9 @@ DEFAULT_LIMITS: dict[str, int] = {
     "unbookmark": 100,
     "delete": 50,
     "thread_tweet": 50,  # each tweet in a thread counts
+    "list_create": 10,
+    "list_add": 100,
+    "list_remove": 100,
 }
 
 

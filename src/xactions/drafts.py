@@ -178,6 +178,9 @@ DRAFT_ACTIONS = frozenset(
         "unfollow",
         "bookmark",
         "unbookmark",
+        "list_create",
+        "list_add",
+        "list_remove",
     }
 )
 
@@ -189,10 +192,13 @@ async def execute_draft(client, draft: dict[str, Any]) -> dict[str, Any]:
     """
     from .actions import (
         create_bookmark,
+        create_list,
         delete_bookmark,
         delete_tweet,
         follow_user,
         like_tweet,
+        list_add_member,
+        list_remove_member,
         post_thread,
         post_tweet,
         retweet,
@@ -208,6 +214,14 @@ async def execute_draft(client, draft: dict[str, Any]) -> dict[str, Any]:
         return await post_tweet(client, params["text"], reply_to_id=params.get("reply_to_id"))
     if action == "post_thread":
         return await post_thread(client, params["tweets"], delay_seconds=params.get("delay_seconds", 1.5))
+    if action == "list_create":
+        return await create_list(
+            client, params["name"], params.get("description", ""), bool(params.get("private"))
+        )
+    if action in {"list_add", "list_remove"}:
+        user_id = params.get("user_id") or await get_user_id(client, params["username"])
+        member_op = list_add_member if action == "list_add" else list_remove_member
+        return await member_op(client, params["list_id"], user_id)
     if action in {"follow", "unfollow"}:
         user_id = params.get("user_id") or await get_user_id(client, params["username"])
         runner = follow_user if action == "follow" else unfollow_user
