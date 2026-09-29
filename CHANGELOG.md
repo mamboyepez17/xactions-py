@@ -10,7 +10,18 @@
 - **MCP tool filter fails closed** and is applied at import time (not only under `python -m`).
 - `xactions post --media` no longer bypasses the approval gate.
 
+- **Every write is charged against the daily caps**: unlike, retweet, unretweet, delete, bookmark and unbookmark were never counted, and `thread_tweet` was defined but unused.
+- **Caps file fails closed**: a corrupt `write_caps.json` used to be treated as empty (resetting the budget); writes are now refused with `CapsFileError` until it is fixed or deleted. Saves are atomic (temp file + rename).
+- **`ClientPool` no longer kills accounts on HTTP 403**: a 403 usually means the resource is off-limits (protected account, blocked search), not a dead session. Only 401/auth errors mark an account dead.
+- **`validate_cookies` reports the logged-in account**: it used to return the author of the first home-timeline tweet (someone you follow). It now reads the `twid` cookie + `UserByRestId`, falling back to `account/settings.json`.
+- **No `br` in `Accept-Encoding`**: httpx cannot decode brotli without the optional `brotli` package, so responses could be unreadable.
+- **Webhook notify no longer blocks the event loop** inside pipelines/watch (the POST runs on the default executor).
+- **Scrape checkpoints are cleared when a list is fully read**, so the next run starts fresh instead of resuming at the end.
+- `mypy src` is clean (was 46 errors): new `XClient` protocol shared by `TwitterClient` and `ClientPool`.
+- `TwitterClient.close()` no longer uses the deprecated `asyncio.get_event_loop()`.
+
 ### Added
+- `mypy` in CI.
 - `xactions-mcp` console script.
 - `drafts.execute_draft()` shared executor (adds `retweet`, `unbookmark`, `post_thread` drafts).
 

@@ -2,7 +2,7 @@
 XActions-PY — ClientPool
 Pool de clientes con rotación de cookies (multi-cuenta).
 
-Cuando una cuenta pega rate limit (429) o sus cookies mueren (401/403),
+Cuando una cuenta pega rate limit (429) o sus cookies mueren (401),
 el pool rota automáticamente a la siguiente cuenta disponible.
 
 Uso:
@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .client import AuthError, ForbiddenError, RateLimitError, TwitterClient, TwitterError
+from .client import AuthError, RateLimitError, TwitterClient, TwitterError
 
 _log = logging.getLogger(__name__)
 
@@ -102,9 +102,12 @@ class ClientPool:
                 last_exc = e
                 _log.warning("ClientPool: rate limit en cuenta #%d, rotando", self._idx)
                 self._rotate()
-            except (AuthError, ForbiddenError) as e:
+            except AuthError as e:
                 last_exc = e
                 self.mark_dead()
+            # ForbiddenError (403) is not caught: it usually means the *resource*
+            # is off-limits (protected account, blocked search), not that this
+            # account's session died, so rotating or killing the account is wrong.
 
         raise last_exc or TwitterError("ClientPool: todas las cuentas fallaron")
 

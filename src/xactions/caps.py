@@ -7,9 +7,11 @@ exceed the cap *before* it reaches X.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -40,20 +42,37 @@ class WriteCapExceeded(Exception):
     """Raised when a write would exceed the rolling 24h budget."""
 
 
+class CapsFileError(WriteCapExceeded):
+    """
+    The caps file exists but cannot be read. Writes are refused (fail closed)
+    rather than silently starting from an empty budget.
+    """
+
+
 def _utc_day_key() -> str:
     return time.strftime("%Y-%m-%d", time.gmtime())
 
 
-def load_caps(path: Path | str | None = None) -> dict[str, Any]:
+def load_caps(path: Path | str | None = None, *, strict: bool = False) -> dict[str, Any]:
+    """
+    Load the caps file. A missing file means an empty budget. An unreadable or
+    malformed file raises CapsFileError when strict (used before writes);
+    otherwise it is logged and treated as empty (reporting only).
+    """
     p = Path(path) if path else DEFAULT_CAPS_PATH
     if not p.exists():
         return {"events": [], "limits": dict(DEFAULT_LIMITS)}
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
+        if not isinstance(data, dict):
+            raise ValueError("top-level JSON value is not an object")
+    except (OSError, ValueError) as e:
+        if strict:
+            raise CapsFileError(
+                f"Write caps file {p} is unreadable ({e}). Refusing writes until it is "
+                "fixed or deleted (deleting resets the 24h budget)."
+            ) from e
         _log.warning("write_caps unreadable (%s): %s", p, e)
-        return {"events": [], "limits": dict(DEFAULT_LIMITS)}
-    if not isinstance(data, dict):
         return {"events": [], "limits": dict(DEFAULT_LIMITS)}
     data.setdefault("events", [])
     limits = dict(DEFAULT_LIMITS)
@@ -65,7 +84,16 @@ def load_caps(path: Path | str | None = None) -> dict[str, Any]:
 def save_caps(data: dict[str, Any], path: Path | str | None = None) -> Path:
     p = Path(path) if path else DEFAULT_CAPS_PATH
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Write-then-rename so a crash mid-write never leaves a truncated file.
+    fd, tmp = tempfile.mkstemp(prefix=p.name, suffix=".tmp", dir=p.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, p)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
     return p
 
 
@@ -143,7 +171,7 @@ def try_charge(
     Raises WriteCapExceeded if not allowed (does not record).
     """
     p = Path(path) if path else DEFAULT_CAPS_PATH
-    data = load_caps(p)
+    data = load_caps(p, strict=True)
     check_write(data, operation, account, now=now)
     data = record_write(data, operation, account, now=now)
     save_caps(data, p)

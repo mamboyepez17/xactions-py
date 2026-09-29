@@ -20,7 +20,7 @@ import os
 import random
 import time
 import uuid
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import unquote
 
 import httpx
@@ -187,6 +187,37 @@ class ForbiddenError(TwitterError):
     pass
 
 
+# ─── Client interface ──────────────────────────────────────────────────────────
+
+class XClient(Protocol):
+    """
+    What scrapers and actions need from a client. Implemented by TwitterClient
+    and ClientPool, so either can be passed anywhere a client is expected.
+    """
+
+    def is_authenticated(self) -> bool: ...
+
+    async def graphql(
+        self,
+        endpoint_name: str,
+        variables: dict[str, Any],
+        features: dict[str, Any] | None = None,
+        mutation: bool = False,
+    ) -> dict[str, Any]: ...
+
+    async def rest_get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]: ...
+
+    async def rest_post(self, path: str, data: dict[str, Any]) -> dict[str, Any]: ...
+
+    async def rest_upload(
+        self, url: str, file_path: str, extra_data: dict[str, Any] | None = None
+    ) -> dict[str, Any]: ...
+
+    async def validate_cookies(self) -> dict[str, Any]: ...
+
+    async def aclose(self) -> None: ...
+
+
 # ─── Cliente ────────────────────────────────────────────────────────────────────
 
 class TwitterClient:
@@ -253,13 +284,12 @@ class TwitterClient:
     def close(self) -> None:
         """Cierre síncrono (útil para wrappers sync)."""
         try:
-            asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
             # No hay loop corriendo; usamos un loop nuevo.
             asyncio.run(self.aclose())
         else:
             # Hay un loop corriendo: no se puede bloquear; programamos el cierre.
-            loop = asyncio.get_event_loop()
             loop.create_task(self.aclose())
 
     @property
@@ -294,6 +324,13 @@ class TwitterClient:
     def is_authenticated(self) -> bool:
         return bool(self._cookies.get("auth_token"))
 
+    def viewer_id(self) -> str | None:
+        """User ID of the logged-in account, from the `twid` cookie ("u=<id>")."""
+        twid = self._cookies.get("twid", "")
+        if twid.startswith("u=") and twid[2:].isdigit():
+            return twid[2:]
+        return None
+
     def _build_headers(
         self,
         extra: dict[str, str] | None = None,
@@ -305,7 +342,9 @@ class TwitterClient:
             "User-Agent": self._user_agent,
             "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
+            # No "br": httpx only decodes brotli when the optional brotli package is
+            # installed, so advertising it could yield undecodable bodies.
+            "Accept-Encoding": "gzip, deflate",
             "Referer": "https://x.com/",
             "Origin": "https://x.com",
             "x-twitter-active-user": "yes",
@@ -656,37 +695,32 @@ class TwitterClient:
         if not data or "data" not in data:
             return {"valid": False, "error": "Respuesta GraphQL vacía o sin data"}
 
-        # Intentar extraer username del home (best-effort)
+        # The home timeline only shows *other* accounts' tweets, so the viewer
+        # is identified from the twid cookie and resolved via UserByRestId.
+        user_id = self.viewer_id()
         username = None
-        user_id = None
-        try:
-            instructions = (
-                data.get("data", {})
-                .get("home", {})
-                .get("home_timeline_urt", {})
-                .get("instructions", [])
-            )
-            for instruction in instructions:
-                for entry in instruction.get("entries", []):
-                    content = entry.get("content", {})
-                    item = content.get("itemContent") or {}
-                    user_results = (
-                        item.get("tweet_results", {})
-                        .get("result", {})
-                        .get("core", {})
-                        .get("user_results", {})
-                        .get("result", {})
-                    )
-                    if user_results:
-                        legacy = user_results.get("legacy", {})
-                        username = legacy.get("screen_name")
-                        user_id = user_results.get("rest_id")
-                        if username:
-                            break
-                if username:
-                    break
-        except (TypeError, AttributeError):
-            pass
+        if user_id:
+            try:
+                me = await self.graphql(
+                    "UserByRestId",
+                    variables={"userId": user_id, "withSafetyModeUserFields": True},
+                )
+                result = me.get("data", {}).get("user", {}).get("result", {})
+                # Newer X payloads moved screen_name from legacy to core.
+                username = (result.get("legacy") or {}).get("screen_name") or (result.get("core") or {}).get(
+                    "screen_name"
+                )
+            except (TwitterError, ValueError) as e:
+                _log.debug("validate_cookies: could not resolve username for %s: %s", user_id, e)
+        else:
+            # No twid cookie (e.g. only auth_token+ct0 were copied): ask the
+            # account settings endpoint the web app uses for the viewer's handle.
+            try:
+                settings = await self.rest_get("/1.1/account/settings.json")
+                if isinstance(settings, dict):
+                    username = settings.get("screen_name")
+            except (TwitterError, ValueError) as e:
+                _log.debug("validate_cookies: account settings lookup failed: %s", e)
 
         return {
             "valid": True,

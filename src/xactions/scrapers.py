@@ -22,6 +22,7 @@ from .client import (
     NotFoundError,
     TwitterClient,
     TwitterError,
+    XClient,
 )
 
 _log = logging.getLogger(__name__)
@@ -259,7 +260,7 @@ def _instructions_from_data(data: dict[str, Any], path: list[str]) -> list[dict[
 
 # ─── Scrapers de perfil ───────────────────────────────────────────────────────
 
-async def scrape_profile(client: TwitterClient, username: str) -> dict[str, Any]:
+async def scrape_profile(client: XClient, username: str) -> dict[str, Any]:
     """Obtiene el perfil de un usuario por @username."""
     data = await client.graphql(
         "UserByScreenName",
@@ -289,7 +290,7 @@ async def scrape_profile(client: TwitterClient, username: str) -> dict[str, Any]
 # ─── Scrapers de relaciones ───────────────────────────────────────────────────
 
 async def _paginate_users(
-    client: TwitterClient,
+    client: XClient,
     endpoint: str,
     user_id: str,
     limit: int | None = 100,
@@ -303,6 +304,7 @@ async def _paginate_users(
 
     all_users: list[dict[str, Any]] = []
     cursor: str | None = None
+    exhausted = False  # True once X has no further pages
     if checkpoint_key:
         cursor = load_cursor(checkpoint_key)
         if cursor:
@@ -331,6 +333,7 @@ async def _paginate_users(
         batch, new_cursor = _parse_user_list(instructions)
 
         if not batch:
+            exhausted = True
             break
 
         all_users.extend(batch)
@@ -339,19 +342,19 @@ async def _paginate_users(
             save_cursor(checkpoint_key, new_cursor)
 
         if not new_cursor or new_cursor == cursor:
+            exhausted = True
             break
         cursor = new_cursor
 
-    if checkpoint_key and limit is not None and len(all_users) >= limit:
-        # finished requested slice — keep cursor so next call continues
-        pass
-    elif checkpoint_key and not cursor:
+    # Stopping at `limit` keeps the saved cursor so the next call continues;
+    # reaching the end of the list clears it so the next run starts fresh.
+    if checkpoint_key and exhausted:
         mark_scrape_complete(checkpoint_key)
 
     return all_users if limit is None else all_users[:limit]
 
 
-async def get_user_id(client: TwitterClient, username: str) -> str:
+async def get_user_id(client: XClient, username: str) -> str:
     """Obtiene el ID numerico de un usuario (con cache en memoria)."""
     key = username.lower()
     if key in _USER_ID_CACHE:
@@ -365,7 +368,7 @@ async def get_user_id(client: TwitterClient, username: str) -> str:
 
 
 async def scrape_followers(
-    client: TwitterClient,
+    client: XClient,
     username: str,
     limit: int = 100,
     checkpoint: bool = False,
@@ -376,7 +379,7 @@ async def scrape_followers(
 
 
 async def scrape_following(
-    client: TwitterClient,
+    client: XClient,
     username: str,
     limit: int = 100,
     checkpoint: bool = False,
@@ -393,7 +396,7 @@ MIN_FOLLOWER_COVERAGE = 0.9
 
 
 async def scrape_non_followers(
-    client: TwitterClient,
+    client: XClient,
     username: str,
     limit: int = 200,
     min_follower_coverage: float = MIN_FOLLOWER_COVERAGE,
@@ -430,7 +433,7 @@ async def scrape_non_followers(
 # ─── Scraper de tweets ────────────────────────────────────────────────────────
 
 async def scrape_tweets(
-    client: TwitterClient,
+    client: XClient,
     username: str,
     limit: int = 50,
     include_replies: bool = False,
@@ -474,7 +477,7 @@ async def scrape_tweets(
 
 
 async def get_user_likes(
-    client: TwitterClient,
+    client: XClient,
     username: str,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
@@ -518,7 +521,7 @@ async def get_user_likes(
 # ─── Replies y thread ───────────────────────────────────────────────────────────
 
 async def get_tweet_replies(
-    client: TwitterClient,
+    client: XClient,
     tweet_id: str,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
@@ -576,7 +579,7 @@ async def get_tweet_replies(
 # ─── Engagement: favoriters y retweeters ──────────────────────────────────────
 
 async def get_tweet_favoriters(
-    client: TwitterClient,
+    client: XClient,
     tweet_id: str,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
@@ -611,7 +614,7 @@ async def get_tweet_favoriters(
 
 
 async def get_tweet_retweeters(
-    client: TwitterClient,
+    client: XClient,
     tweet_id: str,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
@@ -648,7 +651,7 @@ async def get_tweet_retweeters(
 # ─── Bookmarks ──────────────────────────────────────────────────────────────────
 
 async def get_bookmarks(
-    client: TwitterClient,
+    client: XClient,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """Obtiene los bookmarks del usuario autenticado. Requiere auth."""
@@ -693,7 +696,7 @@ async def get_bookmarks(
 # ─── Home timeline ────────────────────────────────────────────────────────────
 
 async def get_home_timeline(
-    client: TwitterClient,
+    client: XClient,
     limit: int = 50,
     latest: bool = False,
 ) -> list[dict[str, Any]]:
@@ -735,7 +738,7 @@ async def get_home_timeline(
 
 # ─── Trends ───────────────────────────────────────────────────────────────────
 
-async def get_trends(client: TwitterClient, woeid: int = 1) -> list[dict[str, Any]]:
+async def get_trends(client: XClient, woeid: int = 1) -> list[dict[str, Any]]:
     """
     Obtiene trending topics de Twitter/X via REST API.
     woeid: 1 = worldwide, 23424977 = USA, 44418 = London, etc.
@@ -760,7 +763,7 @@ async def get_trends(client: TwitterClient, woeid: int = 1) -> list[dict[str, An
 # ─── Búsqueda ─────────────────────────────────────────────────────────────────
 
 async def search_tweets(
-    client: TwitterClient,
+    client: XClient,
     query: str,
     limit: int = 50,
     mode: str = "Top",

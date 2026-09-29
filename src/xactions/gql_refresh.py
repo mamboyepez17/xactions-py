@@ -321,7 +321,7 @@ async def refresh_endpoints(
     Si nada funciona, devuelve `base` sin tocar.
     """
     owns_client = http is None
-    if owns_client:
+    if http is None:
         http = httpx.AsyncClient(timeout=45.0, follow_redirects=True)
     try:
         source = "none"

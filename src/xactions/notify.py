@@ -6,6 +6,7 @@ Default: log. Optional HTTP POST webhook (JSON body, no fancy signing yet).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Callable
@@ -35,16 +36,28 @@ def make_notifier(
     url = url or webhook_url()
     extra = extra or {}
 
+    def _post(payload: dict[str, Any]) -> None:
+        assert url is not None
+        try:
+            # short timeout; notify should never hang the pipeline
+            httpx.post(url, json=payload, timeout=5.0)
+        except httpx.HTTPError as e:
+            _log.warning("webhook failed: %s", e)
+
     def _notify(message: str) -> None:
         _log.info("notify: %s", message)
         if not url:
             return
         payload = {"text": message, "message": message, **extra}
         try:
-            # short timeout; notify should never hang the pipeline
-            httpx.post(url, json=payload, timeout=5.0)
-        except httpx.HTTPError as e:
-            _log.warning("webhook failed: %s", e)
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            _post(payload)
+            return
+        # Called from async code (pipeline/watch): a blocking POST would freeze
+        # the event loop for up to the timeout, so run it on the default
+        # executor. asyncio.run() waits for executor jobs before returning.
+        loop.run_in_executor(None, _post, payload)
 
     return _notify
 

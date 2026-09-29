@@ -37,7 +37,7 @@ def generate_transaction_id(
     Create an x-client-transaction-id value.
     mode: 'bound' (default) or 'uuid' (v1.5 behaviour).
     """
-    mode = (mode or os.getenv("XACTIONS_TXID_MODE", "bound")).lower()
+    mode = (mode or os.getenv("XACTIONS_TXID_MODE") or "bound").lower()
     if mode == "uuid":
         return str(uuid.uuid4())
 

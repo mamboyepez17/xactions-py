@@ -30,6 +30,9 @@ jobs:
       - name: Lint with ruff
         run: ruff check src tests
 
+      - name: Type-check with mypy
+        run: mypy src
+
       - name: Run tests
         env:
           XACTIONS_NO_GQL_REFRESH: "1"

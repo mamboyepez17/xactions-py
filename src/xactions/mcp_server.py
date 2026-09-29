@@ -27,7 +27,7 @@ try:
     # mcp >= 2
     from mcp.server.mcpserver import MCPServer as _MCPServer
 except ImportError:  # pragma: no cover - compat mcp 1.x
-    from mcp.server.fastmcp import FastMCP as _MCPServer
+    from mcp.server.fastmcp import FastMCP as _MCPServer  # type: ignore[no-redef,attr-defined]
 
 from .actions import (
     bulk_unfollow,

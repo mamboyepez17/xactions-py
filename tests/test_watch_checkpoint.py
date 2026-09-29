@@ -1,5 +1,6 @@
 """Tests B4: watch deltas + scrape checkpoints."""
 
+import json
 from pathlib import Path
 
 import httpx
@@ -39,8 +40,10 @@ def test_filter_new_ids(tmp_path: Path):
 
 
 @respx.mock
-async def test_paginate_resumes_from_checkpoint(tmp_path: Path):
+async def test_paginate_resumes_from_checkpoint(tmp_path: Path, monkeypatch):
     from xactions.client import GRAPHQL_ENDPOINTS as GE
+
+    monkeypatch.setattr("xactions.watch.DEFAULT_STATE_DIR", tmp_path)
 
     old = GE["Followers"].copy()
     GE["Followers"]["queryId"] = "FOLLOWERSID123456"
@@ -82,18 +85,28 @@ async def test_paginate_resumes_from_checkpoint(tmp_path: Path):
                 }
             }
         }
-        respx.post("https://x.com/i/api/graphql/FOLLOWERSID123456/Followers").mock(
+        route = respx.post("https://x.com/i/api/graphql/FOLLOWERSID123456/Followers").mock(
             return_value=httpx.Response(200, json=page1)
+        )
+        last_page = json.loads(
+            json.dumps(page1).replace('"u1"', '"u2"').replace(', {"entryId": "cursor-bottom-1", "content": {"value": "CURSOR_NEXT"}}', "")
         )
         client = TwitterClient(cookies="auth_token=a; ct0=b")
         users = await _paginate_users(
             client, "Followers", "uid", limit=1, checkpoint_key="ckpt:test"
         )
         assert len(users) == 1
-        assert load_cursor("ckpt:test", tmp_path) in (None, "CURSOR_NEXT") or True
-        # cursor saved to default state dir
-
+        # stopped at the limit: cursor kept so the next call resumes
         assert load_cursor("ckpt:test") == "CURSOR_NEXT"
+
+        # next call resumes from the cursor and reaches the end of the list
+        route.mock(return_value=httpx.Response(200, json=last_page))
+        users = await _paginate_users(
+            client, "Followers", "uid", limit=5, checkpoint_key="ckpt:test"
+        )
+        assert [u["id"] for u in users] == ["u2"]
+        assert "CURSOR_NEXT" in route.calls.last.request.read().decode()
+        assert load_cursor("ckpt:test") is None  # complete: next run starts fresh
     finally:
         GE["Followers"].update(old)
 

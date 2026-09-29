@@ -16,8 +16,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from .caps import WriteCapExceeded, check_write, load_caps, record_write, save_caps
-from .client import UPLOAD_BASE, AuthError, TwitterClient
+from .caps import CapsFileError, WriteCapExceeded, check_write, load_caps, record_write, save_caps
+from .client import UPLOAD_BASE, AuthError, XClient
 
 _log = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ _log = logging.getLogger(__name__)
 CAPS_ENABLED = True
 
 
-def _require_auth(client: TwitterClient) -> None:
+def _require_auth(client: XClient) -> None:
     if not client.is_authenticated():
         raise AuthError("Se requiere autenticación. Configura auth_token y ct0.")
 
@@ -48,7 +48,7 @@ def _before_write(client: Any, operation: str) -> None:
     """Raise WriteCapExceeded before hitting X (does not record yet)."""
     if not CAPS_ENABLED:
         return
-    data = load_caps()
+    data = load_caps(strict=True)
     check_write(data, operation, _account_key(client))
 
 
@@ -57,16 +57,16 @@ def _after_write(client: Any, operation: str) -> None:
     if not CAPS_ENABLED:
         return
     try:
-        data = load_caps()
+        data = load_caps(strict=True)
         data = record_write(data, operation, _account_key(client))
         save_caps(data)
-    except OSError as e:
+    except (OSError, CapsFileError) as e:
         _log.warning("No se pudo registrar write cap: %s", e)
 
 
 # ─── Media upload ─────────────────────────────────────────────────────────────
 
-async def upload_media(client: TwitterClient, file_path: str) -> dict[str, Any]:
+async def upload_media(client: XClient, file_path: str) -> dict[str, Any]:
     """
     Sube una imagen (jpg/png/gif/webp) a Twitter y devuelve su media_id.
     Requiere auth. Límite simple upload: ~5MB por imagen.
@@ -83,7 +83,7 @@ async def upload_media(client: TwitterClient, file_path: str) -> dict[str, Any]:
 # ─── Tweets ───────────────────────────────────────────────────────────────────
 
 async def post_tweet(
-    client: TwitterClient,
+    client: XClient,
     text: str,
     reply_to_id: str | None = None,
     media_ids: list | None = None,
@@ -142,7 +142,7 @@ async def post_tweet(
 
 
 async def post_thread(
-    client: TwitterClient,
+    client: XClient,
     tweets: list[str],
     delay_seconds: float = 1.5,
 ) -> dict[str, Any]:
@@ -160,6 +160,7 @@ async def post_thread(
         text = (text or "").strip()
         if not text:
             continue
+        _before_write(client, "thread_tweet")
         result = await post_tweet(client, text, reply_to_id=reply_to)
         if not result.get("success") or not result.get("tweet_id"):
             return {
@@ -171,6 +172,7 @@ async def post_thread(
                     or f"No se pudo publicar el tweet {i + 1}/{len(tweets)}"
                 ),
             }
+        _after_write(client, "thread_tweet")
         tweet_ids.append(result["tweet_id"])
         reply_to = result["tweet_id"]
         if i < len(tweets) - 1:
@@ -184,19 +186,23 @@ async def post_thread(
     }
 
 
-async def delete_tweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
+async def delete_tweet(client: XClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
+    _before_write(client, "delete")
     data = await client.graphql(
         "DeleteTweet",
         variables={"tweet_id": tweet_id, "dark_request": False},
         mutation=True,
     )
-    return {"success": "data" in data}
+    ok = "data" in data
+    if ok:
+        _after_write(client, "delete")
+    return {"success": ok}
 
 
 # ─── Engagement ─────────────────────────────────────────────────────────────
 
-async def like_tweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
+async def like_tweet(client: XClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
     _before_write(client, "like")
     data = await client.graphql(
@@ -210,62 +216,82 @@ async def like_tweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
     return {"success": ok}
 
 
-async def unlike_tweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
+async def unlike_tweet(client: XClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
+    _before_write(client, "unlike")
     data = await client.graphql(
         "UnfavoriteTweet",
         variables={"tweet_id": tweet_id},
         mutation=True,
     )
-    return {"success": data.get("data", {}).get("unfavorite_tweet") == "Done"}
+    ok = data.get("data", {}).get("unfavorite_tweet") == "Done"
+    if ok:
+        _after_write(client, "unlike")
+    return {"success": ok}
 
 
-async def retweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
+async def retweet(client: XClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
+    _before_write(client, "retweet")
     data = await client.graphql(
         "CreateRetweet",
         variables={"tweet_id": tweet_id, "dark_request": False},
         mutation=True,
     )
     result = data.get("data", {}).get("create_retweet", {}).get("retweet_results", {})
-    return {"success": bool(result)}
+    ok = bool(result)
+    if ok:
+        _after_write(client, "retweet")
+    return {"success": ok}
 
 
-async def unretweet(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
+async def unretweet(client: XClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
+    _before_write(client, "unretweet")
     data = await client.graphql(
         "DeleteRetweet",
         variables={"source_tweet_id": tweet_id, "dark_request": False},
         mutation=True,
     )
-    return {"success": bool(data.get("data"))}
+    ok = bool(data.get("data"))
+    if ok:
+        _after_write(client, "unretweet")
+    return {"success": ok}
 
 
 # ─── Bookmarks ───────────────────────────────────────────────────────────────
 
-async def create_bookmark(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
+async def create_bookmark(client: XClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
+    _before_write(client, "bookmark")
     data = await client.graphql(
         "CreateBookmark",
         variables={"tweet_id": tweet_id},
         mutation=True,
     )
-    return {"success": "data" in data}
+    ok = "data" in data
+    if ok:
+        _after_write(client, "bookmark")
+    return {"success": ok}
 
 
-async def delete_bookmark(client: TwitterClient, tweet_id: str) -> dict[str, Any]:
+async def delete_bookmark(client: XClient, tweet_id: str) -> dict[str, Any]:
     _require_auth(client)
+    _before_write(client, "unbookmark")
     data = await client.graphql(
         "DeleteBookmark",
         variables={"tweet_id": tweet_id},
         mutation=True,
     )
-    return {"success": "data" in data}
+    ok = "data" in data
+    if ok:
+        _after_write(client, "unbookmark")
+    return {"success": ok}
 
 
 # ─── Follow / Unfollow ─────────────────────────────────────────────────────────
 
-async def follow_user(client: TwitterClient, user_id: str) -> dict[str, Any]:
+async def follow_user(client: XClient, user_id: str) -> dict[str, Any]:
     """Follow por user_id. Usa REST endpoint (no GraphQL mutation disponible)."""
     _require_auth(client)
     _before_write(client, "follow")
@@ -279,7 +305,7 @@ async def follow_user(client: TwitterClient, user_id: str) -> dict[str, Any]:
     return {"success": ok}
 
 
-async def unfollow_user(client: TwitterClient, user_id: str) -> dict[str, Any]:
+async def unfollow_user(client: XClient, user_id: str) -> dict[str, Any]:
     """Unfollow por user_id."""
     _require_auth(client)
     _before_write(client, "unfollow")
@@ -296,7 +322,7 @@ async def unfollow_user(client: TwitterClient, user_id: str) -> dict[str, Any]:
 # ─── Bulk unfollow ─────────────────────────────────────────────────────────────
 
 async def bulk_unfollow(
-    client: TwitterClient,
+    client: XClient,
     user_ids: list,
     delay_seconds: float = 2.0,
     on_progress: Callable[[int, int, str], None] | None = None,

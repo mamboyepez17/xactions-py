@@ -32,6 +32,7 @@ from .client import (
     RateLimitError,
     TwitterClient,
     TwitterError,
+    XClient,
     refresh_graphql_endpoints,
 )
 from .db import TrackerDB, compute_profile_delta
@@ -71,6 +72,7 @@ __all__ = [
     "__version__",
     # client
     "TwitterClient",
+    "XClient",
     "ClientPool",
     "TwitterError",
     "AuthError",
