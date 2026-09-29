@@ -33,7 +33,7 @@ TWIKIT_GQL_URL = (
     "https://raw.githubusercontent.com/d60/twikit/main/twikit/client/gql.py"
 )
 
-# queryId:"...",operationName:"..." (orden puede invertirse; comillas dobles o backticks)
+# queryId:"...",operationName:"..." (either order; double quotes or backticks)
 _PAIR_RES = (
     re.compile(
         r'queryId\s*:\s*["`](?P<queryId>[A-Za-z0-9_-]{10,})["`]\s*,\s*'
