@@ -114,6 +114,22 @@ xactions engage "keyword" --like --limit 5 --dry-run
 xactions engage "keyword" --like --limit 5 --execute   # daily caps apply
 ```
 
+### Scheduled tweets
+
+```bash
+xactions schedule add "Launch day 🚀" --at "2026-10-01T09:00"   # local time
+xactions schedule add "Reminder" --at +2h                        # or +30m / +1d
+xactions schedule list [--all]
+xactions schedule cancel 3
+xactions schedule run            # publish everything due (daily caps apply)
+xactions schedule run --every 60 # or keep running
+# cron: */5 * * * * xactions schedule run
+```
+
+Posts live in the tracking SQLite DB. A post is claimed atomically before
+publishing, so overlapping runs never double-post; one interrupted mid-publish
+stays `posting` for you to check rather than being retried.
+
 **Daily write caps** live in `~/.xactions/write_caps.json` and stop over-budget writes before they hit X.
 
 **Approval gate** (MCP/agent safety):
@@ -293,6 +309,7 @@ src/xactions/
   gql_refresh.py      # query ID heal
   mcp_groups.py       # MCP tool filter
   mcp_server.py
+  schedule.py         # scheduled tweets queue
   cli/                # `xactions` entry point
     _common.py        #   client setup, output writers, tables
     read.py           #   profile, tweets, search, timelines
@@ -300,6 +317,7 @@ src/xactions/
     write.py          #   post, like, follow, bulk-unfollow, engage
     monitor.py        #   watch, download-media, unfollowers
     system.py         #   validate, pipeline, gql-*, doctor, drafts
+    schedule.py       #   schedule add/list/cancel/run
 tests/                # pytest + respx
 ```
 

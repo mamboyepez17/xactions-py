@@ -24,7 +24,7 @@ if sys.platform == "win32":
             except ValueError:
                 pass
 
-from . import analytics, monitor, read, system, write  # noqa: F401  (register commands)
+from . import analytics, monitor, read, schedule, system, write  # noqa: F401  (register commands)
 from ._app import cli
 from ._common import _safe_error_message
 

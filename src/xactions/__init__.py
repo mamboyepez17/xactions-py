@@ -38,6 +38,7 @@ from .client import (
 from .db import TrackerDB, compute_profile_delta
 from .doctor import run_doctor
 from .pool import ClientPool
+from .schedule import ScheduleStore, parse_when, run_due
 from .scrapers import (
     clear_user_id_cache,
     get_bookmarks,
@@ -133,5 +134,8 @@ __all__ = [
     # v1.6
     "WriteCapExceeded",
     "try_charge",
+    "ScheduleStore",
+    "parse_when",
+    "run_due",
     "run_doctor",
 ]

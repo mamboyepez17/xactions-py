@@ -61,7 +61,7 @@ class TrackerDB:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
-        # WAL permite lecturas concurrentes mientras otro proceso escribe.
+        # WAL lets readers proceed while another process writes.
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=10000")
         return conn
@@ -70,7 +70,7 @@ class TrackerDB:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
 
-    # ─── Escritura ────────────────────────────────────────────────────────────
+    # ─── Writes ───────────────────────────────────────────────────────────────
 
     def save_profile_snapshot(self, username: str, profile: dict[str, Any]) -> None:
         with self._connect() as conn:
@@ -113,7 +113,7 @@ class TrackerDB:
             )
         return len(rows)
 
-    # ─── Lectura ──────────────────────────────────────────────────────────────
+    # ─── Reads ───────────────────────────────────────────────────────────────
 
     def get_last_profile_snapshot(self, username: str) -> dict[str, Any] | None:
         with self._connect() as conn:
