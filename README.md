@@ -94,6 +94,7 @@ xactions tweets nasa --limit 20 --table
 xactions search "crypto" --from elonmusk --min-faves 50 --lang es --exclude-retweets
 xactions analyze nasa           # engagement stats
 xactions report nasa --format md
+xactions track nasa && xactions report nasa --format html --out nasa.html  # + follower-history chart
 xactions report userA userB --format html --out compare.html
 xactions compare userA userB
 xactions sentiment "openai" --limit 30

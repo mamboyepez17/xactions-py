@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 
 import click
@@ -179,16 +180,21 @@ def compare(client, user_a, user_b, limit, output, table):
 @click.option("--limit", "-l", default=50, show_default=True, help="Tweets to sample")
 @click.option("--format", "fmt", type=click.Choice(["md", "html"]), default="md")
 @click.option("--out", "out_path", default=None, help="Write report to file (default stdout)")
+@click.option("--db", "db_path", default=None, help="Tracking DB for the follower-history chart (html)")
+@click.option("--no-history", is_flag=True, help="Skip the follower-history chart")
 @click.option("--cookies", envvar=COOKIES_ENV, default="")
 @click.option("--cookies-file", type=click.Path(exists=True), default=None)
 @click.option("--from-browser", type=click.Choice(["chrome", "chromium", "brave", "edge", "firefox"]), default=None)
 @with_client
-def report(client, target, target_b, limit, fmt, out_path):
+def report(client, target, target_b, limit, fmt, out_path, db_path, no_history):
     """
     Generate a shareable engagement report.
 
     xactions report USERNAME
     xactions report USER_A USER_B --format html --out compare.html
+
+    Single-account HTML reports include a follower-history chart when the
+    account has been snapshotted with `xactions track` (2+ snapshots).
     """
     from ..report import (
         render_account_report_html,
@@ -220,11 +226,17 @@ def report(client, target, target_b, limit, fmt, out_path):
             )
 
         prof, tw = run(_one())
-        content = (
-            render_account_report_html(prof, tw)
-            if fmt == "html"
-            else render_account_report_md(prof, tw)
-        )
+        if fmt == "html":
+            history = []
+            if not no_history:
+                from ..db import DEFAULT_DB_PATH
+
+                path = db_path or str(DEFAULT_DB_PATH)
+                if os.path.exists(path):  # never create an empty DB just to read it
+                    history = TrackerDB(path).get_profile_history(target, limit=365)
+            content = render_account_report_html(prof, tw, history=history)
+        else:
+            content = render_account_report_md(prof, tw)
 
     if out_path:
         with open(out_path, "w", encoding="utf-8") as f:
