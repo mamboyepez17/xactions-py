@@ -8,7 +8,6 @@ import functools
 import json
 import os
 import sys
-from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 import click
@@ -28,10 +27,6 @@ PROXY_ENV = "TWITTER_PROXY"
 
 AnyClient = TwitterClient | ClientPool
 
-try:
-    __version__ = version("xactions-py")
-except PackageNotFoundError:
-    __version__ = "1.5.0"
 
 
 def _load_cookies_list(cookies: str, cookies_file: str | None, from_browser: str | None = None) -> list[str]:

@@ -473,7 +473,7 @@ tests/                # pytest + respx
 
 | Version | Highlights |
 |---------|------------|
-| **Unreleased** | Scheduled tweets, X Lists, video/GIF upload, signed webhooks, follower-history chart, CSV/NDJSON everywhere, PyPI release workflow; write-safety fixes (caps that persist, full follower list for non-followers, MCP approval gate), English-only codebase |
+| **1.9.0** | Scheduled tweets, X Lists, video/GIF upload, signed webhooks, follower-history chart, CSV/NDJSON everywhere, PyPI release workflow; write-safety fixes (caps that persist, full follower list for non-followers, MCP approval gate), English-only codebase |
 | **1.8.0** | Sentiment lexicon, `engage` with caps |
 | **1.7.0** | `report`, `pipeline`, webhook notify, MCP tool groups |
 | **1.6.0** | `doctor`, daily caps, `--from-browser`, drafts, txid, `watch`, media, unfollowers |

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from ._common import __version__
+from .. import __version__  # single source of truth: package metadata
 
 # ─── CLI principal ────────────────────────────────────────────────────────────
 
