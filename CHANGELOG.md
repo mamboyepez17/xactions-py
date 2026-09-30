@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.9.0 — 2026-09-30
 
 ### Fixed
 - **`--table` crashed on every read command** (it iterated the result wrapper instead of the rows).
