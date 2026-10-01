@@ -2,7 +2,8 @@
 
 **X/Twitter automation toolkit in pure Python** — inspired by [XActions](https://github.com/nirholas/XActions), built lean: **no npm, no Puppeteer**, just `httpx` + X's internal GraphQL API.
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)
+[![PyPI](https://img.shields.io/pypi/v/xactions-py?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/xactions-py/)
+[![Python](https://img.shields.io/pypi/pyversions/xactions-py?style=flat-square&logo=python)](https://pypi.org/project/xactions-py/)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Dependencies](https://img.shields.io/badge/deps-3-brightgreen?style=flat-square)
 ![npm free](https://img.shields.io/badge/npm-free-red?style=flat-square)
@@ -40,15 +41,15 @@ XActions (JS) is a large platform (browser scripts, website, extension). **xacti
 
 ## Install
 
+From [PyPI](https://pypi.org/project/xactions-py/):
+
 ```bash
-git clone https://github.com/mamboyepez17/xactions-py
-cd xactions-py
-pip install -e .
-# Optional: MCP + dev tools
-pip install -e ".[mcp,dev]"
+pip install xactions-py              # library + `xactions` CLI
+pip install "xactions-py[mcp]"       # + MCP server for AI agents (`xactions-mcp`)
+pip install -U xactions-py           # upgrade to the latest release
 ```
 
-Virtualenv (recommended):
+In a virtualenv (recommended):
 
 ```bash
 python -m venv .venv
@@ -56,8 +57,11 @@ python -m venv .venv
 source .venv/bin/activate
 # Windows
 .venv\Scripts\Activate.ps1
-pip install -e ".[mcp,dev]"
+pip install "xactions-py[mcp]"
+xactions --version
 ```
+
+Working on the code itself? See [Development](#development) to install from source.
 
 ---
 
@@ -325,18 +329,19 @@ takes a client accepts anything implementing the `XClient` protocol (`TwitterCli
 ## MCP server (AI agents)
 
 ```bash
-pip install -e ".[mcp]"
+pip install "xactions-py[mcp]"
 TWITTER_COOKIES="auth_token=...; ct0=..." xactions-mcp     # or: python -m xactions.mcp_server
 ```
 
-Claude Desktop (`claude_desktop_config.json`):
+Claude Desktop (`claude_desktop_config.json`). `command` must be the `xactions-mcp` installed
+above. If it is in a virtualenv, use its full path (e.g. `/path/to/.venv/bin/xactions-mcp`,
+or `C:\path\to\.venv\Scripts\xactions-mcp.exe` on Windows; inside the JSON, write each `\` as `\\`):
 
 ```json
 {
   "mcpServers": {
     "xactions-py": {
-      "command": "python",
-      "args": ["-m", "xactions.mcp_server"],
+      "command": "xactions-mcp",
       "env": {
         "TWITTER_COOKIES": "auth_token=YOUR_TOKEN; ct0=YOUR_CT0"
       }
@@ -405,7 +410,9 @@ X rotates internal query IDs. v1.5+ mitigates this:
 ## Development
 
 ```bash
-pip install -e ".[mcp,dev]"
+git clone https://github.com/mamboyepez17/xactions-py
+cd xactions-py
+pip install -e ".[mcp,dev]"       # editable install with test/lint tools
 pre-commit install                # ruff + mypy + hygiene hooks on every commit
 pytest --cov                      # coverage floor: 55%
 ruff check src tests && mypy src  # same checks CI runs
@@ -418,13 +425,37 @@ your real `~/.xactions`.
 
 ## Releasing
 
-1. Bump `version` in `pyproject.toml` and move the CHANGELOG `Unreleased` notes under it.
-2. Tag and push: `git tag v1.9.0 && git push origin v1.9.0`.
-3. `.github/workflows/release.yml` runs the tests, builds, checks and publishes to PyPI.
+Releases are published to [PyPI](https://pypi.org/project/xactions-py/) by
+`.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed. It runs ruff, mypy and the tests,
+checks that the tag matches `pyproject.toml`, builds, runs `twine check --strict` and publishes
+through PyPI Trusted Publishing (no API token is stored anywhere).
 
-One-time setup: on PyPI, add a *Trusted Publisher* for this repo (workflow `release.yml`,
-environment `pypi`), and create the `pypi` environment under the repo's GitHub settings.
-No API token is stored anywhere.
+**Each release**
+
+1. In a PR: bump `version` in `pyproject.toml` (e.g. `1.9.1`) and rename the CHANGELOG
+   `Unreleased` section to `vX.Y.Z — YYYY-MM-DD`. Merge it.
+2. Create the tag on `main`, either way:
+   - **GitHub web:** *Releases → Draft a new release → Choose a tag* → type `v1.9.1` →
+     *Create new tag on publish*, target `main`, title `v1.9.1`, paste the CHANGELOG notes →
+     *Publish release*.
+   - **Terminal:** `git fetch origin && git tag v1.9.1 origin/main && git push origin v1.9.1`.
+3. Watch *Actions → Release*. If the `pypi` environment has required reviewers, approve the
+   `publish` job under *Review deployments*.
+4. Check https://pypi.org/project/xactions-py/ and `pip install -U xactions-py`.
+
+**One-time setup (already done for this repo)**
+
+- **PyPI:** *Account → Publishing* → add a GitHub trusted publisher: owner `mamboyepez17`,
+  repo `xactions-py`, workflow `release.yml`, environment `pypi`.
+- **GitHub:** *Settings → Environments → New environment* `pypi`. If you restrict where it can
+  deploy from (*Deployment branches and tags → Selected branches and tags*), the rule must
+  have **Ref type: Tag** with pattern `v*`. A *branch* rule named `v*` blocks every release
+  with "Tag … is not allowed to deploy to pypi due to environment protection rules".
+
+**If `publish` fails** after `build` passed, nothing was uploaded. Fix the cause (usually the
+environment rule above), then on the failed run use *Re-run jobs → Re-run failed jobs*. There
+is no need for a new tag. A version number can only be uploaded to PyPI once, so a release that
+*did* publish broken needs a new version.
 
 ---
 
